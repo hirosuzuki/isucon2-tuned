@@ -1,6 +1,6 @@
 var util = require('util'),
     async = require('async'),
-    mysql = require('mysql');
+    mysql = require('mysql2');
 
 var init = exports.init = function(teams, callback){
   var storage = new Storage('localhost', 3306, 'isumaster2', 'throwing', 'isumaster2');
@@ -15,7 +15,7 @@ var Storage = exports.Storage = function(host, port, user, password, database){
 };
 
 Storage.prototype.client = function(){
-  return mysql.createClient(this.db);
+  return mysql.createConnection(this.db);
 };
 
 var RESULT_FIELDS = 'teamid,failed,score,tickets,soldouts,soldoutAt,gets,posts,errors,timeouts,detail,inserted_at';

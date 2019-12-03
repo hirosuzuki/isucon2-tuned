@@ -5,7 +5,7 @@
   "dependencies": {
     "async": "0.1.22",
     "cheerio": "0.10.1",
-    "mysql": "0.9.6",
-    "express": "3.0.0"
+    "express": "3.0.0",
+    "mysql2": "^2.0.1"
   }
 }
