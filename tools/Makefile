@@ -1,5 +1,5 @@
 help:
-	echo make ( setup | install | run | stop )
+	@echo make '[ setup | install | run | stop ]'
 
 setup:
 	sudo apt update
