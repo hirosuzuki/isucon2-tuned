@@ -1,10 +1,16 @@
 {
     "testing": false,
     "teams": [
-        { "id": 1, "name": "local", "display":"TestTeam<br />localhost", "target_ip": "127.0.0.1", "target_port": 5000 }
+        { "id": 1, "name": "team1", "display":"TestTeam1<br />10.146.0.31", "target_ip": "10.146.0.31", "target_port": 5000 },
+        { "id": 2, "name": "team2", "display":"TestTeam2<br />10.146.0.32", "target_ip": "10.146.0.32", "target_port": 5000 },
+        { "id": 3, "name": "team3", "display":"TestTeam3<br />10.146.0.33", "target_ip": "10.146.0.33", "target_port": 5000 },
+        { "id": 4, "name": "team4", "display":"TestTeam3<br />10.146.0.34", "target_ip": "10.146.0.34", "target_port": 5000 }
     ],
     "users": [
         {"name":"manager","password":"foo","teams":[],"admin":true},
-        {"name":"team1","password":"xxx","teams":[1]}
+        {"name":"team1","password":"xxx","teams":[1]},
+        {"name":"team2","password":"xxx","teams":[2]},
+        {"name":"team3","password":"xxx","teams":[3]},
+        {"name":"team4","password":"xxx","teams":[4]}
     ]
 }
