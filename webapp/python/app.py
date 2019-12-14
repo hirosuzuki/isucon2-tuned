@@ -72,12 +72,17 @@ def close_db_connection(exception):
     if hasattr(top, 'db'):
         top.db.close()
 
+def get_artists(cache=None):
+    if not cache:
+        cur = get_db().cursor()
+        cur.execute('SELECT * FROM artist')
+        cache = cur.fetchall()
+        cur.close()
+    return cache
+
 @app.route("/")
 def top_page():
-    cur = get_db().cursor()
-    cur.execute('SELECT * FROM artist')
-    artists = cur.fetchall()
-    cur.close()
+    artists = get_artists()
     recent_sold = get_recent_sold()
     return render_template('index.html', artists=artists, recent_sold=recent_sold)
 
