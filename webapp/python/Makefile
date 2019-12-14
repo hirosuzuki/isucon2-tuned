@@ -10,5 +10,5 @@ install:
 	venv/bin/pip install -r requirements.txt
 
 run:
-	venv/bin/gunicorn -c gunicorn_config.py -w 10 app:app --access-logfile -
+	venv/bin/gunicorn -c gunicorn_config.py -w 10 app:app --access-logfile - --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 

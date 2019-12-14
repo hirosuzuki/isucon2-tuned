@@ -13,6 +13,7 @@ from flask import (
         render_template, _app_ctx_stack, Response
         )
 
+import googlecloudprofiler
 import json, os
 
 config = {}
@@ -203,4 +204,10 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", '5000'))
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
+    googlecloudprofiler.start(
+        service='hello-profiler',
+        service_version='1.0.1',
+        verbose=3,
+        # project_id='my-project-id'
+    )
     load_config()
