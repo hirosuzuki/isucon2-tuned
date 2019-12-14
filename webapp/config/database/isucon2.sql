@@ -1,9 +1,9 @@
 CREATE DATABASE IF NOT EXISTS isucon2 DEFAULT CHARACTER SET 'utf8';
 
--- CREATE USER 'isucon2app'@'%' IDENTIFIED BY 'isunageruna';
--- GRANT ALL ON isucon2.* TO 'isucon2app'@'%';
--- CREATE USER 'isucon2app'@'localhost' IDENTIFIED BY 'isunageruna';
--- GRANT ALL ON isucon2.* TO 'isucon2app'@'localhost';
+CREATE USER 'isucon2app'@'%' IDENTIFIED BY 'isunageruna';
+GRANT ALL ON isucon2.* TO 'isucon2app'@'%';
+CREATE USER 'isucon2app'@'localhost' IDENTIFIED BY 'isunageruna';
+GRANT ALL ON isucon2.* TO 'isucon2app'@'localhost';
 
 FLUSH PRIVILEGES;
 
