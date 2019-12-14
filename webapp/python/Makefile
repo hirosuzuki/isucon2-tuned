@@ -12,3 +12,5 @@ install:
 run:
 	venv/bin/gunicorn -c gunicorn_config.py -w 10 app:app --access-logfile - --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
+kataribe:
+	cat /var/log/nginx/main.log | ./kataribe
