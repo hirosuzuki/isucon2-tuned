@@ -98,9 +98,8 @@ def artist_page(artist_id):
 
     for ticket in tickets:
         cur.execute(
-            '''SELECT COUNT(*) AS cnt FROM variation
-                INNER JOIN stock ON stock.variation_id = variation.id
-                WHERE variation.ticket_id = %s AND stock.order_id IS NULL''',
+            '''SELECT sum(4096 - sold_count) as cnt FROM variation
+                WHERE variation.ticket_id = %s''',
             (ticket['id'],)
         )
         ticket['count'] = cur.fetchone()['cnt']
@@ -114,37 +113,50 @@ def artist_page(artist_id):
         recent_sold=get_recent_sold()
     )
 
+
+def get_stocks(id, cache={}):
+    if not id in cache:
+        cur = get_db().cursor()
+        cur.execute(
+            'SELECT seat_id, null as order_id FROM stock WHERE variation_id = %s order by id',
+            (id,)
+        )
+        cache[id] = cur.fetchall()
+        cur.close()
+    return cache[id]
+
+def get_ticket(ticket_id, cache={}):
+    if not id in cache:
+        cur = get_db().cursor()
+        cur.execute(
+            'SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = %s LIMIT 1',
+            (ticket_id,)
+        )
+        cache[id] = cur.fetchone()
+        cur.close()
+    return cache[id]
+
+
 @app.route("/ticket/<int:ticket_id>")
 def ticket_page(ticket_id):
     cur = get_db().cursor()
-    
-    cur.execute(
-        'SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = %s LIMIT 1',
-        (ticket_id,)
-    )
-    ticket = cur.fetchone()
+   
+    ticket = get_ticket(ticket_id)
 
     cur.execute(
-        'SELECT id, name FROM variation WHERE ticket_id = %s',
+        'SELECT id, name, sold_count FROM variation WHERE ticket_id = %s',
         (ticket_id,)
     )
     variations = cur.fetchall()
 
     for variation in variations:
-        cur.execute(
-            'SELECT seat_id, order_id FROM stock WHERE variation_id = %s',
-            (variation['id'],)
-        )
-        stocks = cur.fetchall()
+        stocks = get_stocks(variation['id'])
+        variation['vacancy'] = len(stocks) - variation['sold_count']
         variation['stock'] = {}
-        for row in stocks:
-            variation['stock'][row['seat_id']] = row['order_id']
-
-        cur.execute(
-            'SELECT COUNT(*) AS cunt FROM stock WHERE variation_id = %s AND order_id IS NULL',
-            (variation['id'],)
-        )
-        variation['vacancy'] = cur.fetchone()['cunt']
+        i = 0
+        for stock in stocks:
+            variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
+            i += 1
 
     return render_template(
         'ticket.html',
@@ -166,8 +178,12 @@ def buy_page():
     )
     order_id = db.insert_id()
     rows = cur.execute(
-        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY RAND() LIMIT 1',
+        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY id LIMIT 1',
         (order_id, variation_id)
+    )
+    cur.execute(
+        'UPDATE variation SET sold_count = sold_count + 1 WHERE id = %s',
+        (variation_id,)
     )
     if rows > 0:
         cur.execute(
@@ -209,10 +225,12 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", '5000'))
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
+    """
     googlecloudprofiler.start(
         service='hello-profiler',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
     )
+    """
     load_config()

@@ -14,3 +14,7 @@ run:
 
 kataribe:
 	cat /var/log/nginx/main.log | ./kataribe
+
+
+rotate-nginx-log:
+	sudo mv /var/log/nginx/main.log /var/log/nginx/main.log-`date +%Y%m%d-%H%M%S` ; sudo systemctl restart nginx
