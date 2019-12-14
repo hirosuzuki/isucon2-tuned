@@ -10,11 +10,13 @@ except ImportError:
 
 from flask import (
         Flask, request, redirect,
+        render_template_string,
         render_template, _app_ctx_stack, Response
         )
 
-import googlecloudprofiler
+# import googlecloudprofiler
 import json, os
+import redis
 
 config = {}
 
@@ -65,6 +67,28 @@ def get_db():
         top.db = connect_db()
     return top.db
 
+cache = {}
+
+def get_redis():
+    if not 'redis' in cache:
+        cache['redis'] = redis.Redis(host='localhost', port=6379, db=0)
+    return cache['redis']
+
+def get_variation():
+    if not 'variation' in cache:
+        variation = {}
+        cur = get_db().cursor()
+        cur.execute('''select variation.*, ticket.name as ticket_name, artist_id, artist.name as artist_name,
+            (select min(id) from stock where stock.variation_id = variation.id) as min_stock_id
+            from variation, ticket, artist
+            where variation.ticket_id = ticket.id and ticket.artist_id = artist.id
+            order by variation.id''')
+        for row in cur.fetchall():
+            variation[row['id']] = row
+        print(variation)
+        cur.close()
+        cache['variation'] = variation
+    return cache['variation']
 
 @app.teardown_appcontext
 def close_db_connection(exception):
@@ -72,19 +96,37 @@ def close_db_connection(exception):
     if hasattr(top, 'db'):
         top.db.close()
 
-def get_artists(cache=None):
-    if not cache:
+def get_artists():
+    if not 'artists' in cache:
         cur = get_db().cursor()
         cur.execute('SELECT * FROM artist')
-        cache = cur.fetchall()
+        artists = cur.fetchall()
+        print(artists)
+        cache['artists'] = artists
         cur.close()
-    return cache
+    return cache['artists']
+
+def get_sidebar():
+    redis = get_redis()
+    html = redis.get('html_sidebar')
+    if not html:
+        recent_sold = get_recent_sold()
+        html = render_template_string(file('templates/side.html').read().decode('utf-8'), recent_sold=recent_sold)
+        redis.set('html_sidebar', html.encode('utf-8'))
+    else:
+        html = html.decode('utf-8')
+    return html
+
+def clear_sidebar():
+    redis = get_redis()
+    redis.delete('html_sidebar')
 
 @app.route("/")
 def top_page():
+    variation = get_variation()
     artists = get_artists()
-    recent_sold = get_recent_sold()
-    return render_template('index.html', artists=artists, recent_sold=recent_sold)
+    sidebar = get_sidebar()
+    return render_template('index.html', artists=artists, sidebar=sidebar)
 
 @app.route("/artist/<int:artist_id>")
 def artist_page(artist_id):
@@ -106,11 +148,13 @@ def artist_page(artist_id):
 
     cur.close()
 
+    sidebar = get_sidebar()
+
     return render_template(
         'artist.html',
         artist=artist,
         tickets=tickets,
-        recent_sold=get_recent_sold()
+        sidebar=sidebar
     )
 
 
@@ -158,15 +202,19 @@ def ticket_page(ticket_id):
             variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
             i += 1
 
+    sidebar = get_sidebar()
+
     return render_template(
         'ticket.html',
         ticket=ticket,
         variations=variations,
-        recent_sold=get_recent_sold()
+        sidebar=sidebar
     )
 
 @app.route("/buy", methods=['POST'])
 def buy_page():
+    clear_sidebar()
+
     variation_id = int(request.values['variation_id'])
     member_id = request.values['member_id']
 
@@ -199,6 +247,7 @@ def buy_page():
 
 @app.route("/admin", methods=['GET', 'POST'])
 def admin_page():
+    clear_sidebar()
     if request.method == 'POST':
         init_db()
         return redirect("/admin")
@@ -234,3 +283,4 @@ else:
     )
     """
     load_config()
+
