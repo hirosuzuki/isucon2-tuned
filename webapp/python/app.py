@@ -158,7 +158,7 @@ def artist_page(artist_id):
     )
 
 
-def get_stocks(id, cache={}):
+def get_stocks(id):
     if not id in cache:
         cur = get_db().cursor()
         cur.execute(
@@ -169,7 +169,7 @@ def get_stocks(id, cache={}):
         cur.close()
     return cache[id]
 
-def get_ticket(ticket_id, cache={}):
+def get_ticket(ticket_id):
     if not id in cache:
         cur = get_db().cursor()
         cur.execute(
