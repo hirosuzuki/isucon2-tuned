@@ -142,6 +142,35 @@ def get_ticket(ticket_id):
     return cache[id]
 
 
+def buy_page_request_order(db, cur, member_id):
+    cur.execute(
+        'INSERT INTO order_request (member_id) VALUES (%s)',
+        (member_id,)
+    )
+    return db.insert_id()
+
+def buy_page_reserve_stock(cur, order_id, variation_id):
+    row = cur.execute(
+        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY id LIMIT 1',
+        (order_id, variation_id)
+    )
+    return row
+
+def buy_page_inc_stock_count(cur, variation_id):
+    row = cur.execute(
+        'UPDATE variation SET sold_count = sold_count + 1 WHERE id = %s',
+        (variation_id,)
+    )
+    return row
+
+def buy_page_get_seat_id(cur, order_id):
+    cur.execute(
+        'SELECT seat_id FROM stock WHERE order_id = %s LIMIT 1',
+        (order_id,)
+    )
+    return cur.fetchone()
+
+
 @app.route("/buy", methods=['POST'])
 def buy_page():
 
@@ -152,27 +181,15 @@ def buy_page():
 
     db = get_db()
     cur = db.cursor()
-    cur.execute(
-        'INSERT INTO order_request (member_id) VALUES (%s)',
-        (member_id,)
-    )
-    order_id = db.insert_id()
-    rows = cur.execute(
-        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY id LIMIT 1',
-        (order_id, variation_id)
-    )
-    cur.execute(
-        'UPDATE variation SET sold_count = sold_count + 1 WHERE id = %s',
-        (variation_id,)
-    )
+
+    order_id = buy_page_request_order(db, cur, member_id)
+
+    rows = buy_page_reserve_stock(cur, order_id, variation_id)
+    buy_page_inc_stock_count(cur, variation_id)
+
     if rows > 0:
-        cur.execute(
-            'SELECT seat_id FROM stock WHERE order_id = %s LIMIT 1',
-            (order_id,)
-        );
-        stock = cur.fetchone()
+        stock = buy_page_get_seat_id(cur, order_id)
         db.commit()
-    
         create_side_html()
         create_ticket_html(variation[variation_id]['ticket_id'])
         create_artist_html(variation[variation_id]['artist_id'])
@@ -296,13 +313,13 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", '5000'))
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
-    """
+    
     googlecloudprofiler.start(
-        service='isucon2-profiler-2',
+        service='isucon2-profiler-5',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
     )
-    """
+    
     load_config()
 
