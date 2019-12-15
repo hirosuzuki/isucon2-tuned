@@ -83,13 +83,18 @@ def get_recent_sold():
     return recent_sold
 
 
+cache = {}
+
 def get_db():
+    """
+    if not 'db' in cache:
+        cache['db'] = connect_db()
+    return cache['db']
+    """
     top = _app_ctx_stack.top
     if not hasattr(top, 'db'):
         top.db = connect_db()
     return top.db
-
-cache = {}
 
 def get_redis():
     if not 'redis' in cache:
@@ -107,7 +112,6 @@ def get_variation():
             order by variation.id''')
         for row in cur.fetchall():
             variation[row['id']] = row
-        print(variation)
         cur.close()
         cache['variation'] = variation
     return cache['variation']
@@ -123,7 +127,6 @@ def get_artists():
         cur = get_db().cursor()
         cur.execute('SELECT * FROM artist')
         artists = cur.fetchall()
-        print(artists)
         cache['artists'] = artists
         cur.close()
     return cache['artists']
@@ -346,7 +349,7 @@ if __name__ == "__main__":
 else:
     
     googlecloudprofiler.start(
-        service='isucon2-profiler-6',
+        service='isucon2-profiler-7',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
