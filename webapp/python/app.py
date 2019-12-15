@@ -16,6 +16,7 @@ from flask import (
 
 import googlecloudprofiler
 import json, os
+import redis
 
 config = {}
 
@@ -57,6 +58,19 @@ def init_db():
                     cur.execute(line)
 
 def get_recent_sold():
+    redis = get_redis()
+    rows = redis.lrange("recent",0, 9)
+    recent_sold = []
+    for row in rows:
+        vs = row.decode("utf-8").split(":")
+        recent_sold.append({
+            "seat_id": vs[0],
+            "v_name": vs[1],
+            "t_name": vs[2],
+            "a_name": vs[3],
+        })
+    return recent_sold
+
     cur = get_db().cursor()
     cur.execute('''SELECT stock.seat_id, variation.name AS v_name, ticket.name AS t_name, artist.name AS a_name FROM stock
         JOIN variation ON stock.variation_id = variation.id
@@ -156,12 +170,19 @@ def buy_page_reserve_stock(cur, order_id, variation_id):
     )
     return row
 
-def buy_page_inc_stock_count(cur, variation_id):
+def buy_page_reserve_stock2(cur, order_id, variation_id, stock_id):
     row = cur.execute(
-        'UPDATE variation SET sold_count = sold_count + 1 WHERE id = %s',
-        (variation_id,)
+        'UPDATE stock SET order_id = %s WHERE id = %s',
+        (order_id, stock_id)
     )
     return row
+
+def buy_page_inc_stock_count(db, cur, variation_id):
+    cur.execute(
+        'UPDATE variation SET sold_count = last_insert_id(sold_count + 1) WHERE id = %s',
+        (variation_id,)
+    )
+    return db.insert_id()
 
 def buy_page_get_seat_id(cur, order_id):
     cur.execute(
@@ -178,30 +199,36 @@ def buy_page():
     member_id = request.values['member_id']
 
     variation = get_variation()
+    vari = variation[variation_id]
 
     db = get_db()
     cur = db.cursor()
 
-    order_id = buy_page_request_order(db, cur, member_id)
+    sold_count = buy_page_inc_stock_count(db, cur, variation_id)
+    if sold_count > 4096:
+        db.rollback()
+        return render_template('soldout.html')
 
-    rows = buy_page_reserve_stock(cur, order_id, variation_id)
-    buy_page_inc_stock_count(cur, variation_id)
+    order_id = buy_page_request_order(db, cur, member_id)
+    index = sold_count - 1
+    rows = buy_page_reserve_stock2(cur, order_id, variation_id, vari['min_stock_id'] + index)
 
     if rows > 0:
-        stock = buy_page_get_seat_id(cur, order_id)
+        # stock = buy_page_get_seat_id(cur, order_id)
+        seat_id = "%02d-%02d" % (index // 64, index % 64)
         db.commit()
-        create_side_html()
-        create_ticket_html(variation[variation_id]['ticket_id'])
-        create_artist_html(variation[variation_id]['artist_id'])
 
-        return render_template('complete.html', seat_id=stock['seat_id'], member_id=member_id)
+        redis = get_redis()
+        redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
+        redis.ltrim("recent", 0, 9)
+
+        create_side_html()
+        create_ticket_html(vari['ticket_id'])
+        create_artist_html(vari['artist_id'])
+
+        return render_template('complete.html', seat_id=seat_id, member_id=member_id)
     else:
         db.rollback()
-        
-        create_side_html()
-        create_ticket_html(variation[variation_id]['ticket_id'])
-        create_artist_html(variation[variation_id]['artist_id'])
-
         return render_template('soldout.html')
 
 def file_write(filename, text):
@@ -287,9 +314,13 @@ def init_cache_html():
 def admin_page():
     if request.method == 'POST':
         init_db()
+        redis = get_redis()
+        redis.delete('recent')
         init_cache_html()
         return redirect("/admin")
     else:
+        redis = get_redis()
+        redis.delete('recent')
         init_cache_html()
         return render_template('admin.html')
 
@@ -315,7 +346,7 @@ if __name__ == "__main__":
 else:
     
     googlecloudprofiler.start(
-        service='isucon2-profiler-5',
+        service='isucon2-profiler-6',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
