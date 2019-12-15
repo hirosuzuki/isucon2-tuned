@@ -21,6 +21,13 @@ config = {}
 
 app = Flask(__name__, static_url_path='')
 
+from jinja2 import Environment, FileSystemLoader, FileSystemBytecodeCache
+
+app.jinja2env = Environment(
+    loader=FileSystemLoader('./templates'),
+    bytecode_cache=FileSystemBytecodeCache(directory='./templates_compiled', pattern='%s.cache')
+)
+
 HTML_BASE = '/var/www/cached'
 
 def load_config():
@@ -108,7 +115,8 @@ def get_artists():
     return cache['artists']
 
 def render_to_string(template_name, **context):
-    result = render_template_string(open('templates/' + template_name).read(), **context)
+    template = app.jinja2env.get_template(template_name)
+    result = template.render(**context)
     return result
 
 def get_stocks(id):
@@ -208,13 +216,19 @@ def create_ticket_html(ticket_id):
     variations = cur.fetchall()
 
     for variation in variations:
-        stocks = get_stocks(variation['id'])
-        variation['vacancy'] = len(stocks) - variation['sold_count']
-        variation['stock'] = {}
+        variation['vacancy'] = 4096 - variation['sold_count']
+        html = ""
         i = 0
-        for stock in stocks:
-            variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
-            i += 1
+        for row in range(64):
+            html += "<tr>\n"
+            for col in range(64):
+                key = "%02d-%02d" % (row, col)
+                state = "unavailable" if i < variation['sold_count'] else "available"
+                html += '<td id="%s" class="%s"></td>\n' % (key, state)
+                i += 1
+            html += "</tr>"
+        variation['html'] = html
+
 
     html = render_to_string('ticket.html', ticket=ticket, variations=variations)
     file_write(HTML_BASE + '/ticket/%d' % ticket_id, html)
@@ -284,7 +298,7 @@ if __name__ == "__main__":
 else:
     """
     googlecloudprofiler.start(
-        service='isucon2-profiler-1',
+        service='isucon2-profiler-2',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'

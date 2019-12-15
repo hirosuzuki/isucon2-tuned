@@ -21,14 +21,7 @@
 {% set stock = variation.stock %}
 <h4>{{ variation.name }}</h4>
 <table class="seats" data-variationid="{{ variation.id }}">
-    {% for row in range(64) %}
-  <tr>
-      {% for col in range(64) %}
-      {% set key = "%02d-%02d" % (row, col) %}
-    <td id="{{ key }}" class="{% if stock[key] %}unavailable{% else %}available{% endif %}"></td>
-      {% endfor %}
-  </tr>
-    {% endfor %}
+{{ variation.html | safe }}
 </table>
 {% endfor %}
 
