@@ -225,9 +225,9 @@ def buy_page():
         redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
         redis.ltrim("recent", 0, 9)
 
-        create_side_html()
-        create_ticket_html(vari['ticket_id'])
-        create_artist_html(vari['artist_id'])
+        #create_side_html()
+        #create_ticket_html(vari['ticket_id'])
+        #create_artist_html(vari['artist_id'])
 
         return render_template('complete.html', seat_id=seat_id, member_id=member_id)
     else:
@@ -313,6 +313,11 @@ def init_cache_html():
     for artist_id in artist_ids:
         create_artist_html(artist_id)
 
+@app.route("/update", methods=['GET'])
+def html_update():
+    init_cache_html()
+    return "OK"
+
 @app.route("/admin", methods=['GET', 'POST'])
 def admin_page():
     if request.method == 'POST':
@@ -349,7 +354,7 @@ if __name__ == "__main__":
 else:
     
     googlecloudprofiler.start(
-        service='isucon2-profiler-7',
+        service='isucon2-profiler-8',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
