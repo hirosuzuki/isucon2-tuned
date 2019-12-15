@@ -3,7 +3,7 @@ help:
 
 setup:
 	sudo apt update
-	sudo apt install gcc libssl-dev mysql-server libmysqlclient-dev python virtualenv python-dev python3-venv
+	sudo apt install gcc libssl-dev mysql-server libmysqlclient-dev python virtualenv python-dev python3-venv python3-dev
 
 install:
 	python3 -m venv venv3

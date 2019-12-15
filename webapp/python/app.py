@@ -14,7 +14,7 @@ from flask import (
         render_template, _app_ctx_stack, Response
         )
 
-# import googlecloudprofiler
+import googlecloudprofiler
 import json, os
 import gzip
 
@@ -287,7 +287,7 @@ if __name__ == "__main__":
 else:
     """
     googlecloudprofiler.start(
-        service='hello-profiler',
+        service='isucon2-profiler-1',
         service_version='1.0.1',
         verbose=3,
         # project_id='my-project-id'
