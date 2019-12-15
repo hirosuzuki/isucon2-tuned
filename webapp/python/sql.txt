@@ -1,0 +1,3 @@
+create index stock_order on stock (order_id);
+alter table variation add sold_count int default 0;
+

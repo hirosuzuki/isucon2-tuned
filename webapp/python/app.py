@@ -10,10 +10,13 @@ except ImportError:
 
 from flask import (
         Flask, request, redirect,
+        render_template_string,
         render_template, _app_ctx_stack, Response
         )
 
+# import googlecloudprofiler
 import json, os
+import redis
 
 config = {}
 
@@ -64,6 +67,28 @@ def get_db():
         top.db = connect_db()
     return top.db
 
+cache = {}
+
+def get_redis():
+    if not 'redis' in cache:
+        cache['redis'] = redis.Redis(host='localhost', port=6379, db=0)
+    return cache['redis']
+
+def get_variation():
+    if not 'variation' in cache:
+        variation = {}
+        cur = get_db().cursor()
+        cur.execute('''select variation.*, ticket.name as ticket_name, artist_id, artist.name as artist_name,
+            (select min(id) from stock where stock.variation_id = variation.id) as min_stock_id
+            from variation, ticket, artist
+            where variation.ticket_id = ticket.id and ticket.artist_id = artist.id
+            order by variation.id''')
+        for row in cur.fetchall():
+            variation[row['id']] = row
+        print(variation)
+        cur.close()
+        cache['variation'] = variation
+    return cache['variation']
 
 @app.teardown_appcontext
 def close_db_connection(exception):
@@ -71,14 +96,37 @@ def close_db_connection(exception):
     if hasattr(top, 'db'):
         top.db.close()
 
+def get_artists():
+    if not 'artists' in cache:
+        cur = get_db().cursor()
+        cur.execute('SELECT * FROM artist')
+        artists = cur.fetchall()
+        print(artists)
+        cache['artists'] = artists
+        cur.close()
+    return cache['artists']
+
+def get_sidebar():
+    redis = get_redis()
+    html = redis.get('html_sidebar')
+    if not html:
+        recent_sold = get_recent_sold()
+        html = render_template_string(file('templates/side.html').read().decode('utf-8'), recent_sold=recent_sold)
+        redis.set('html_sidebar', html.encode('utf-8'))
+    else:
+        html = html.decode('utf-8')
+    return html
+
+def clear_sidebar():
+    redis = get_redis()
+    redis.delete('html_sidebar')
+
 @app.route("/")
 def top_page():
-    cur = get_db().cursor()
-    cur.execute('SELECT * FROM artist')
-    artists = cur.fetchall()
-    cur.close()
-    recent_sold = get_recent_sold()
-    return render_template('index.html', artists=artists, recent_sold=recent_sold)
+    variation = get_variation()
+    artists = get_artists()
+    sidebar = get_sidebar()
+    return render_template('index.html', artists=artists, sidebar=sidebar)
 
 @app.route("/artist/<int:artist_id>")
 def artist_page(artist_id):
@@ -92,63 +140,81 @@ def artist_page(artist_id):
 
     for ticket in tickets:
         cur.execute(
-            '''SELECT COUNT(*) AS cnt FROM variation
-                INNER JOIN stock ON stock.variation_id = variation.id
-                WHERE variation.ticket_id = %s AND stock.order_id IS NULL''',
+            '''SELECT sum(4096 - sold_count) as cnt FROM variation
+                WHERE variation.ticket_id = %s''',
             (ticket['id'],)
         )
         ticket['count'] = cur.fetchone()['cnt']
 
     cur.close()
 
+    sidebar = get_sidebar()
+
     return render_template(
         'artist.html',
         artist=artist,
         tickets=tickets,
-        recent_sold=get_recent_sold()
+        sidebar=sidebar
     )
+
+
+def get_stocks(id):
+    if not id in cache:
+        cur = get_db().cursor()
+        cur.execute(
+            'SELECT seat_id, null as order_id FROM stock WHERE variation_id = %s order by id',
+            (id,)
+        )
+        cache[id] = cur.fetchall()
+        cur.close()
+    return cache[id]
+
+def get_ticket(ticket_id):
+    if not id in cache:
+        cur = get_db().cursor()
+        cur.execute(
+            'SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = %s LIMIT 1',
+            (ticket_id,)
+        )
+        cache[id] = cur.fetchone()
+        cur.close()
+    return cache[id]
+
 
 @app.route("/ticket/<int:ticket_id>")
 def ticket_page(ticket_id):
     cur = get_db().cursor()
-    
-    cur.execute(
-        'SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = %s LIMIT 1',
-        (ticket_id,)
-    )
-    ticket = cur.fetchone()
+   
+    ticket = get_ticket(ticket_id)
 
     cur.execute(
-        'SELECT id, name FROM variation WHERE ticket_id = %s',
+        'SELECT id, name, sold_count FROM variation WHERE ticket_id = %s',
         (ticket_id,)
     )
     variations = cur.fetchall()
 
     for variation in variations:
-        cur.execute(
-            'SELECT seat_id, order_id FROM stock WHERE variation_id = %s',
-            (variation['id'],)
-        )
-        stocks = cur.fetchall()
+        stocks = get_stocks(variation['id'])
+        variation['vacancy'] = len(stocks) - variation['sold_count']
         variation['stock'] = {}
-        for row in stocks:
-            variation['stock'][row['seat_id']] = row['order_id']
+        i = 0
+        for stock in stocks:
+            variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
+            i += 1
 
-        cur.execute(
-            'SELECT COUNT(*) AS cunt FROM stock WHERE variation_id = %s AND order_id IS NULL',
-            (variation['id'],)
-        )
-        variation['vacancy'] = cur.fetchone()['cunt']
+    sidebar = get_sidebar()
 
     return render_template(
         'ticket.html',
         ticket=ticket,
         variations=variations,
-        recent_sold=get_recent_sold()
+        sidebar=sidebar
     )
 
 @app.route("/buy", methods=['POST'])
 def buy_page():
+    clear_sidebar()
+
     variation_id = int(request.values['variation_id'])
     member_id = request.values['member_id']
 
@@ -160,8 +226,12 @@ def buy_page():
     )
     order_id = db.insert_id()
     rows = cur.execute(
-        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY RAND() LIMIT 1',
+        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY id LIMIT 1',
         (order_id, variation_id)
+    )
+    cur.execute(
+        'UPDATE variation SET sold_count = sold_count + 1 WHERE id = %s',
+        (variation_id,)
     )
     if rows > 0:
         cur.execute(
@@ -177,6 +247,7 @@ def buy_page():
 
 @app.route("/admin", methods=['GET', 'POST'])
 def admin_page():
+    clear_sidebar()
     if request.method == 'POST':
         init_db()
         return redirect("/admin")
@@ -203,4 +274,13 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", '5000'))
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
+    """
+    googlecloudprofiler.start(
+        service='hello-profiler',
+        service_version='1.0.1',
+        verbose=3,
+        # project_id='my-project-id'
+    )
+    """
     load_config()
+

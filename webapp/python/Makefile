@@ -10,5 +10,11 @@ install:
 	venv/bin/pip install -r requirements.txt
 
 run:
-	venv/bin/gunicorn -c gunicorn_config.py -w 10 app:app --access-logfile -
+	venv/bin/gunicorn -c gunicorn_config.py -w 10 app:app --access-logfile - --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
+kataribe:
+	cat /var/log/nginx/main.log | ./kataribe
+
+
+rotate-nginx-log:
+	sudo mv /var/log/nginx/main.log /var/log/nginx/main.log-`date +%Y%m%d-%H%M%S` ; sudo systemctl restart nginx

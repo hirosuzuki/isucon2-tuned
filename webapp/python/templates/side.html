@@ -1,0 +1,13 @@
+    <div id="sidebar">
+        {% if recent_sold %}
+      <table>
+        <tr><th colspan="2">最近購入されたチケット</th></tr>
+        {% for item in recent_sold %}
+        <tr>
+          <td class="recent_variation">{{ item.a_name }} {{ item.t_name }} {{ item.v_name }}</td>
+          <td class="recent_seat_id">{{ item.seat_id }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+    </div>
