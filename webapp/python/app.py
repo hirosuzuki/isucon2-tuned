@@ -22,6 +22,8 @@ config = {}
 
 app = Flask(__name__, static_url_path='')
 
+HTML_BASE = '/var/www/cached'
+
 def load_config():
     global config
     print "Loading configuration"
@@ -106,57 +108,9 @@ def get_artists():
         cur.close()
     return cache['artists']
 
-def get_sidebar():
-    redis = get_redis()
-    html = redis.get('html_sidebar')
-    if not html:
-        recent_sold = get_recent_sold()
-        html = render_template_string(file('templates/side.html').read().decode('utf-8'), recent_sold=recent_sold)
-        redis.set('html_sidebar', html.encode('utf-8'))
-    else:
-        html = html.decode('utf-8')
-    return html
-
-def clear_sidebar():
-    redis = get_redis()
-    redis.delete('html_sidebar')
-
-@app.route("/")
-def top_page():
-    variation = get_variation()
-    artists = get_artists()
-    sidebar = get_sidebar()
-    return render_template('index.html', artists=artists, sidebar=sidebar)
-
-@app.route("/artist/<int:artist_id>")
-def artist_page(artist_id):
-    cur = get_db().cursor()
-
-    cur.execute('SELECT id, name FROM artist WHERE id = %s LIMIT 1', (artist_id,))
-    artist = cur.fetchone()
-
-    cur.execute('SELECT id, name FROM ticket WHERE artist_id = %s', (artist_id,))
-    tickets = cur.fetchall()
-
-    for ticket in tickets:
-        cur.execute(
-            '''SELECT sum(4096 - sold_count) as cnt FROM variation
-                WHERE variation.ticket_id = %s''',
-            (ticket['id'],)
-        )
-        ticket['count'] = cur.fetchone()['cnt']
-
-    cur.close()
-
-    sidebar = get_sidebar()
-
-    return render_template(
-        'artist.html',
-        artist=artist,
-        tickets=tickets,
-        sidebar=sidebar
-    )
-
+def render_to_string(template_name, **context):
+    result = render_template_string(file('templates/' + template_name).read().decode('utf-8'), **context)
+    return result
 
 def get_stocks(id):
     if not id in cache:
@@ -181,42 +135,13 @@ def get_ticket(ticket_id):
     return cache[id]
 
 
-@app.route("/ticket/<int:ticket_id>")
-def ticket_page(ticket_id):
-    cur = get_db().cursor()
-   
-    ticket = get_ticket(ticket_id)
-
-    cur.execute(
-        'SELECT id, name, sold_count FROM variation WHERE ticket_id = %s',
-        (ticket_id,)
-    )
-    variations = cur.fetchall()
-
-    for variation in variations:
-        stocks = get_stocks(variation['id'])
-        variation['vacancy'] = len(stocks) - variation['sold_count']
-        variation['stock'] = {}
-        i = 0
-        for stock in stocks:
-            variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
-            i += 1
-
-    sidebar = get_sidebar()
-
-    return render_template(
-        'ticket.html',
-        ticket=ticket,
-        variations=variations,
-        sidebar=sidebar
-    )
-
 @app.route("/buy", methods=['POST'])
 def buy_page():
-    clear_sidebar()
 
     variation_id = int(request.values['variation_id'])
     member_id = request.values['member_id']
+
+    variation = get_variation()
 
     db = get_db()
     cur = db.cursor()
@@ -240,18 +165,106 @@ def buy_page():
         );
         stock = cur.fetchone()
         db.commit()
+        create_side_html()
+        create_top_html()
+        create_ticket_html(variation[variation_id]['ticket_id'])
+        create_artist_html(variation[variation_id]['artist_id'])
+
         return render_template('complete.html', seat_id=stock['seat_id'], member_id=member_id)
     else:
         db.rollback()
+        create_side_html()
+        create_top_html()
+        create_ticket_html(variation[variation_id]['ticket_id'])
+        create_artist_html(variation[variation_id]['artist_id'])
+
         return render_template('soldout.html')
+
+def file_write(filename, text):
+    tmpFile = HTML_BASE + '/tmp.html.%d' % os.getpid()
+    f = open(tmpFile, 'w')
+    f.write(text.encode('utf-8'))
+    f.flush()
+    os.fsync(f.fileno()) 
+    f.close()
+    os.rename(tmpFile, filename)
+
+def create_side_html():
+    html = render_to_string('side.html', recent_sold=get_recent_sold())
+    file_write(HTML_BASE + '/side.html', html)
+
+def create_top_html():
+    artists = get_artists()
+    sidebar = file(HTML_BASE + '/side.html').read().decode('utf-8')
+    html = render_to_string('index.html', artists=artists, sidebar=sidebar)
+    file_write(HTML_BASE + '/index.html', html)
+
+def create_ticket_html(ticket_id):
+    cur = get_db().cursor()
+   
+    ticket = get_ticket(ticket_id)
+
+    cur.execute(
+        'SELECT id, name, sold_count FROM variation WHERE ticket_id = %s',
+        (ticket_id,)
+    )
+    variations = cur.fetchall()
+
+    for variation in variations:
+        stocks = get_stocks(variation['id'])
+        variation['vacancy'] = len(stocks) - variation['sold_count']
+        variation['stock'] = {}
+        i = 0
+        for stock in stocks:
+            variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
+            i += 1
+
+    sidebar = file(HTML_BASE + '/side.html').read().decode('utf-8')
+    html = render_to_string('ticket.html', ticket=ticket, variations=variations, sidebar=sidebar)
+    file_write(HTML_BASE + '/ticket/%d' % ticket_id, html)
+
+def create_artist_html(artist_id):
+    cur = get_db().cursor()
+
+    cur.execute('SELECT id, name FROM artist WHERE id = %s LIMIT 1', (artist_id,))
+    artist = cur.fetchone()
+
+    cur.execute('SELECT id, name FROM ticket WHERE artist_id = %s', (artist_id,))
+    tickets = cur.fetchall()
+
+    for ticket in tickets:
+        cur.execute(
+            '''SELECT sum(4096 - sold_count) as cnt FROM variation
+                WHERE variation.ticket_id = %s''',
+            (ticket['id'],)
+        )
+        ticket['count'] = cur.fetchone()['cnt']
+
+    cur.close()
+
+    sidebar = file(HTML_BASE + '/side.html').read().decode('utf-8')
+    html = render_to_string('artist.html', artist=artist, tickets=tickets, sidebar=sidebar)
+    file_write(HTML_BASE + '/artist/%d' % artist_id, html)
+
+def init_cache_html():
+    variation = get_variation()
+    create_side_html()
+    create_top_html()
+    ticket_ids = set([e['ticket_id']  for e in variation.values()])
+    for ticket_id in ticket_ids:
+        create_ticket_html(ticket_id)
+    artist_ids = set([e['artist_id']  for e in variation.values()])
+    for artist_id in artist_ids:
+        create_artist_html(artist_id)
 
 @app.route("/admin", methods=['GET', 'POST'])
 def admin_page():
-    clear_sidebar()
     if request.method == 'POST':
         init_db()
+        init_cache_html()
         return redirect("/admin")
     else:
+        init_cache_html()
         return render_template('admin.html')
 
 @app.route("/admin/order.csv")
