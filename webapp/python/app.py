@@ -16,7 +16,6 @@ from flask import (
 
 import googlecloudprofiler
 import json, os
-import gzip
 
 config = {}
 
@@ -166,19 +165,17 @@ def buy_page():
         stock = cur.fetchone()
         db.commit()
     
-        sidebar = get_side_html()
-        create_top_html(sidebar)
-        create_ticket_html(variation[variation_id]['ticket_id'], sidebar)
-        create_artist_html(variation[variation_id]['artist_id'], sidebar)
+        create_side_html()
+        create_ticket_html(variation[variation_id]['ticket_id'])
+        create_artist_html(variation[variation_id]['artist_id'])
 
         return render_template('complete.html', seat_id=stock['seat_id'], member_id=member_id)
     else:
         db.rollback()
         
-        sidebar = get_side_html()
-        create_top_html(sidebar)
-        create_ticket_html(variation[variation_id]['ticket_id'], sidebar)
-        create_artist_html(variation[variation_id]['artist_id'], sidebar)
+        create_side_html()
+        create_ticket_html(variation[variation_id]['ticket_id'])
+        create_artist_html(variation[variation_id]['artist_id'])
 
         return render_template('soldout.html')
 
@@ -187,19 +184,19 @@ def file_write(filename, text):
     f = open(tmpFile, 'w')
     f.write(text)
     f.flush()
-    #os.fsync(f.fileno()) 
     f.close()
     os.rename(tmpFile, filename)
 
-def get_side_html():
-    return render_to_string('side.html', recent_sold=get_recent_sold())
+def create_side_html():
+    html = render_to_string('side.html', recent_sold=get_recent_sold())
+    file_write(HTML_BASE + '/side.html', html)
 
-def create_top_html(sidebar):
+def create_top_html():
     artists = get_artists()
-    html = render_to_string('index.html', artists=artists, sidebar=sidebar)
+    html = render_to_string('index.html', artists=artists)
     file_write(HTML_BASE + '/index.html', html)
 
-def create_ticket_html(ticket_id, sidebar):
+def create_ticket_html(ticket_id):
     cur = get_db().cursor()
    
     ticket = get_ticket(ticket_id)
@@ -219,10 +216,10 @@ def create_ticket_html(ticket_id, sidebar):
             variation['stock'][stock['seat_id']] = None if i >= variation['sold_count'] else "xxx"
             i += 1
 
-    html = render_to_string('ticket.html', ticket=ticket, variations=variations, sidebar=sidebar)
+    html = render_to_string('ticket.html', ticket=ticket, variations=variations)
     file_write(HTML_BASE + '/ticket/%d' % ticket_id, html)
 
-def create_artist_html(artist_id, sidebar):
+def create_artist_html(artist_id):
     cur = get_db().cursor()
 
     cur.execute('SELECT id, name FROM artist WHERE id = %s LIMIT 1', (artist_id,))
@@ -241,19 +238,19 @@ def create_artist_html(artist_id, sidebar):
 
     cur.close()
 
-    html = render_to_string('artist.html', artist=artist, tickets=tickets, sidebar=sidebar)
+    html = render_to_string('artist.html', artist=artist, tickets=tickets)
     file_write(HTML_BASE + '/artist/%d' % artist_id, html)
 
 def init_cache_html():
     variation = get_variation()
-    sidebar = get_side_html()
-    create_top_html(sidebar)
+    create_side_html()
+    create_top_html()
     ticket_ids = set([e['ticket_id']  for e in variation.values()])
     for ticket_id in ticket_ids:
-        create_ticket_html(ticket_id, sidebar)
+        create_ticket_html(ticket_id)
     artist_ids = set([e['artist_id']  for e in variation.values()])
     for artist_id in artist_ids:
-        create_artist_html(artist_id, sidebar)
+        create_artist_html(artist_id)
 
 @app.route("/admin", methods=['GET', 'POST'])
 def admin_page():
