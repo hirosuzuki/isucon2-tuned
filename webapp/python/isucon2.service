@@ -5,7 +5,7 @@ After=network.service
 [Service]
 Type=simple
 Restart=on-success
-ExecStart=/opt/isucon2/python/venv/bin/gunicorn --chdir /opt/isucon2/python/ -w 4 app:app --user www-data --group www-data --bind unix:/tmp/gunicorn.sock --capture-output --access-logfile /var/log/gunicorn/accesslog --error-logfile /var/log/gunicorn/errorlog --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
+ExecStart=/opt/isucon2/python/venv/bin/gunicorn --chdir /opt/isucon2/python/ -w 1 app:app --user www-data --group www-data --bind unix:/tmp/gunicorn.sock --capture-output --access-logfile /var/log/gunicorn/accesslog --error-logfile /var/log/gunicorn/errorlog --access-logformat '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]

@@ -31,9 +31,9 @@ setup3:
 	sudo cp isucon2.service /etc/systemd/system
 	sudo systemctl daemon-reload
 	sudo systemctl enable update_loop.service
-	sudo systemctl start update_loop.service
+	sudo systemctl restart update_loop.service
 	sudo systemctl enable isucon2.service
-	sudo systemctl start isucon2.service
+	sudo systemctl restart isucon2.service
 	sudo cp nginx-site-conf /etc/nginx/sites-enabled/default
 	sudo systemctl restart nginx.service
 
