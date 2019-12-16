@@ -29,7 +29,7 @@ app.jinja2env = Environment(
     bytecode_cache=FileSystemBytecodeCache(directory='./templates_compiled', pattern='%s.cache')
 )
 
-HTML_BASE = '/var/www/cached'
+HTML_BASE = '/opt/isucon2/cache'
 
 def load_config():
     global config

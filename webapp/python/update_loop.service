@@ -1,0 +1,11 @@
+[Unit]
+Description=Update Loop
+After=network.service
+
+[Service]
+Type=simple
+Restart=on-success
+ExecStart=/opt/isucon2/python/update_loop.sh
+
+[Install]
+WantedBy=multi-user.target
