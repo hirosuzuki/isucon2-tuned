@@ -84,6 +84,7 @@ for e in VARIATION.values():
     e["artist_name"] = e["artist"]["name"]
 
 def init_db():
+    """
     print("Initializing database")
     db = get_db() 
     cur = db.cursor()
@@ -93,9 +94,9 @@ def init_db():
             if line:
                 cur.execute(line)
         db.commit()
-    
-    redis = get_redis()
+    """
 
+    redis = get_redis()
     redis.delete("history")
     redis.delete("recent")
     for variation in VARIATION.values():
@@ -117,24 +118,15 @@ def get_recent_sold():
 
 cache = {}
 
-def get_db():
-    if not 'db' in cache:
-        cache['db'] = connect_db()
-    return cache['db']
+#def get_db():
+##    if not 'db' in cache:
+#       cache['db'] = connect_db()
+#    return cache['db']
 
 def get_redis():
     if not 'redis' in cache:
         cache['redis'] = redis.Redis(host='localhost', port=6379, db=0)
     return cache['redis']
-
-def get_artists():
-    if not 'artists' in cache:
-        cur = get_db().cursor()
-        cur.execute('SELECT * FROM artist')
-        artists = cur.fetchall()
-        cache['artists'] = artists
-        cur.close()
-    return cache['artists']
 
 def render_to_string(template_name, **context):
     template = app.jinja2env.get_template(template_name)
@@ -163,7 +155,7 @@ def buy_page():
 
     db = None
     cur = None
-    
+
     vari = VARIATION[variation_id]
 
     sold_count = buy_page_inc_stock_count(db, cur, variation_id)
@@ -194,7 +186,6 @@ def create_side_html():
     file_write(HTML_BASE + '/side.html', html)
 
 def create_top_html():
-    artists = get_artists()
     html = render_to_string('index.html', artists=ARTIST.values())
     file_write(HTML_BASE + '/index.html', html)
 
@@ -227,21 +218,13 @@ def create_ticket_html(ticket_id):
     file_write(HTML_BASE + '/ticket/%d' % ticket_id, html)
 
 def create_artist_html(artist_id):
-    cur = get_db().cursor()
-
+    redis = get_redis()
     artist = ARTIST[artist_id]
-    tickets = artist["ticket"]
-
-    for ticket in tickets:
-        cur.execute(
-            '''SELECT sum(4096 - sold_count) as cnt FROM variation
-                WHERE variation.ticket_id = %s''',
-            (ticket['id'],)
-        )
-        ticket['count'] = cur.fetchone()['cnt']
-
-    cur.close()
-
+    tickets = [{
+        "id": t["id"],
+        "name": t["name"],
+        "count": sum([4096 - int(redis.get("sold_%0d" % v["id"])) for v in t["variation"]])
+    } for t in artist["ticket"]]
     html = render_to_string('artist.html', artist=artist, tickets=tickets)
     file_write(HTML_BASE + '/artist/%d' % artist_id, html)
 
