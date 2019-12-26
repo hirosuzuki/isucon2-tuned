@@ -1,12 +1,10 @@
 # sudo aptitude install -y python-flask python-mysqldb python-routes
 from __future__ import with_statement
 
-try:
-    import MySQLdb
-    from MySQLdb.cursors import DictCursor
-except ImportError:
-    import pymysql as MySQLdb
-    from pymysql.cursors import DictCursor
+import MySQLdb
+from MySQLdb.cursors import DictCursor
+#    import pymysql as MySQLdb
+#    from pymysql.cursors import DictCursor
 
 from flask import (
         Flask, request, redirect,
@@ -45,17 +43,21 @@ def connect_db():
     username = config['database']['username']
     password = config['database']['password']
     dbname   = config['database']['dbname']
+    print("Connect MySQL")
     db = MySQLdb.connect(host=host, port=port, db=dbname, user=username, passwd=password, cursorclass=DictCursor, charset="utf8")
     return db
 
 def init_db():
     print("Initializing database")
-    with connect_db() as cur:
-        with open('../config/database/initial_data.sql') as fp:
-            for line in fp:
-                line = line.strip()
-                if line:
-                    cur.execute(line)
+    db = get_db() 
+    cur = db.cursor()
+    with open('../config/database/init_data.sql') as fp:
+        for line in fp:
+            line = line.strip()
+            if line:
+                cur.execute(line)
+        db.commit()
+          
 
 def get_recent_sold():
     redis = get_redis()
@@ -86,15 +88,9 @@ def get_recent_sold():
 cache = {}
 
 def get_db():
-    """
     if not 'db' in cache:
         cache['db'] = connect_db()
     return cache['db']
-    """
-    top = _app_ctx_stack.top
-    if not hasattr(top, 'db'):
-        top.db = connect_db()
-    return top.db
 
 def get_redis():
     if not 'redis' in cache:
@@ -115,12 +111,6 @@ def get_variation():
         cur.close()
         cache['variation'] = variation
     return cache['variation']
-
-@app.teardown_appcontext
-def close_db_connection(exception):
-    top = _app_ctx_stack.top
-    if hasattr(top, 'db'):
-        top.db.close()
 
 def get_artists():
     if not 'artists' in cache:
