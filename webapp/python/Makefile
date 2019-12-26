@@ -37,6 +37,11 @@ setup3:
 	sudo cp nginx-site-conf /etc/nginx/sites-enabled/default
 	sudo systemctl restart nginx.service
 
+app-deploy:
+	sudo cp app.py /opt/isucon2/python/
+	sudo cp isucon2.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+	sudo systemctl restart isucon2.service
 
 install:
 	python3 -m venv venv3
