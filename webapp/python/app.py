@@ -1,18 +1,14 @@
-# sudo aptitude install -y python-flask python-mysqldb python-routes
 from __future__ import with_statement
 
 import MySQLdb
 from MySQLdb.cursors import DictCursor
-#    import pymysql as MySQLdb
-#    from pymysql.cursors import DictCursor
 
 from flask import (
-        Flask, request, redirect,
-        render_template_string,
-        render_template, _app_ctx_stack, Response
-        )
+    Flask, request, redirect,
+    render_template_string,
+    render_template, _app_ctx_stack, Response
+)
 
-import googlecloudprofiler
 import json, os
 import redis
 
@@ -72,18 +68,6 @@ def get_recent_sold():
             "a_name": vs[3],
         })
     return recent_sold
-
-    cur = get_db().cursor()
-    cur.execute('''SELECT stock.seat_id, variation.name AS v_name, ticket.name AS t_name, artist.name AS a_name FROM stock
-        JOIN variation ON stock.variation_id = variation.id
-        JOIN ticket ON variation.ticket_id = ticket.id
-        JOIN artist ON ticket.artist_id = artist.id
-        WHERE order_id IS NOT NULL
-        ORDER BY order_id DESC LIMIT 10''')
-    recent_sold = cur.fetchall()
-    cur.close()
-    return recent_sold
-
 
 cache = {}
 
@@ -156,33 +140,12 @@ def buy_page_request_order(db, cur, member_id, index, variation_id):
     )
     return db.insert_id()
 
-def buy_page_reserve_stock(cur, order_id, variation_id):
-    row = cur.execute(
-        'UPDATE stock SET order_id = %s WHERE variation_id = %s AND order_id IS NULL ORDER BY id LIMIT 1',
-        (order_id, variation_id)
-    )
-    return row
-
-def buy_page_reserve_stock2(cur, order_id, variation_id, stock_id):
-    row = cur.execute(
-        'UPDATE stock SET order_id = %s WHERE id = %s',
-        (order_id, stock_id)
-    )
-    return row
-
 def buy_page_inc_stock_count(db, cur, variation_id):
     cur.execute(
         'UPDATE variation SET sold_count = last_insert_id(sold_count + 1) WHERE id = %s',
         (variation_id,)
     )
     return db.insert_id()
-
-def buy_page_get_seat_id(cur, order_id):
-    cur.execute(
-        'SELECT seat_id FROM stock WHERE order_id = %s LIMIT 1',
-        (order_id,)
-    )
-    return cur.fetchone()
 
 
 @app.route("/buy", methods=['POST'])
@@ -204,26 +167,15 @@ def buy_page():
 
     index = sold_count - 1
     order_id = buy_page_request_order(db, cur, member_id, index, variation_id)
-    #rows = buy_page_reserve_stock2(cur, order_id, variation_id, vari['min_stock_id'] + index)
-    rows = 1
 
-    if rows > 0:
-        # stock = buy_page_get_seat_id(cur, order_id)
-        seat_id = "%02d-%02d" % (index // 64, index % 64)
-        db.commit()
+    seat_id = "%02d-%02d" % (index // 64, index % 64)
+    db.commit()
 
-        redis = get_redis()
-        redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
-        redis.ltrim("recent", 0, 9)
+    redis = get_redis()
+    redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
+    redis.ltrim("recent", 0, 9)
 
-        #create_side_html()
-        #create_ticket_html(vari['ticket_id'])
-        #create_artist_html(vari['artist_id'])
-
-        return render_template('complete.html', seat_id=seat_id, member_id=member_id)
-    else:
-        db.rollback()
-        return render_template('soldout.html')
+    return render_template('complete.html', seat_id=seat_id, member_id=member_id)
 
 def file_write(filename, text):
     tmpFile = HTML_BASE + '/tmp.html.%d' % os.getpid()
@@ -326,9 +278,7 @@ def admin_page():
 @app.route("/admin/order.csv")
 def admin_csv():
     cur = get_db().cursor()
-    cur.execute('''SELECT order_request.*
-         FROM order_request
-         ORDER BY order_request.id ASC''')
+    cur.execute('''SELECT order_request.* FROM order_request ORDER BY order_request.id ASC''')
     orders = cur.fetchall()
     cur.close()
 
@@ -343,13 +293,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", '5000'))
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
-    """    
-    googlecloudprofiler.start(
-        service='isucon2-profiler-8',
-        service_version='1.0.1',
-        verbose=3,
-        # project_id='my-project-id'
-    )
-    """
     load_config()
 
