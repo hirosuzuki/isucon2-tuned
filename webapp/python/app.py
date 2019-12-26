@@ -1,8 +1,5 @@
 from __future__ import with_statement
 
-import MySQLdb
-from MySQLdb.cursors import DictCursor
-
 from flask import (
     Flask, request, redirect,
     render_template_string,
@@ -32,18 +29,6 @@ def load_config():
     env = os.environ.get('ISUCON_ENV') or 'local'
     with open('../config/common.' + env + '.json') as fp:
         config = json.load(fp)
-
-def connect_db():
-    global config
-    host = config['database']['host']
-    port = config['database']['port']
-    username = config['database']['username']
-    password = config['database']['password']
-    dbname   = config['database']['dbname']
-    print("Connect MySQL")
-    db = MySQLdb.connect(host=host, port=port, db=dbname, user=username, passwd=password, cursorclass=DictCursor, charset="utf8")
-    return db
-
 
 ARTIST = {
     1: { "id": 1, "name": "NHN48" },
@@ -83,28 +68,16 @@ for e in VARIATION.values():
     e["artist"] = e["ticket"]["artist"]
     e["artist_name"] = e["artist"]["name"]
 
-def init_db():
-    """
-    print("Initializing database")
-    db = get_db() 
-    cur = db.cursor()
-    with open('../config/database/init_data.sql') as fp:
-        for line in fp:
-            line = line.strip()
-            if line:
-                cur.execute(line)
-        db.commit()
-    """
+redis_conn = redis.Redis(host='localhost', port=6379, db=0)
 
-    redis = get_redis()
-    redis.delete("history")
-    redis.delete("recent")
+def init_db():
+    redis_conn.delete("history")
+    redis_conn.delete("recent")
     for variation in VARIATION.values():
-        redis.set("sold_%0d" % variation["id"], 0)
+        redis_conn.set("sold_%0d" % variation["id"], 0)
 
 def get_recent_sold():
-    redis = get_redis()
-    rows = redis.lrange("recent",0, 9)
+    rows = redis_conn.lrange("recent",0, 9)
     recent_sold = []
     for row in rows:
         vs = row.decode("utf-8").split(":")
@@ -116,34 +89,20 @@ def get_recent_sold():
         })
     return recent_sold
 
-cache = {}
-
-#def get_db():
-##    if not 'db' in cache:
-#       cache['db'] = connect_db()
-#    return cache['db']
-
-def get_redis():
-    if not 'redis' in cache:
-        cache['redis'] = redis.Redis(host='localhost', port=6379, db=0)
-    return cache['redis']
-
 def render_to_string(template_name, **context):
     template = app.jinja2env.get_template(template_name)
     result = template.render(**context)
     return result
 
-def buy_page_request_order(db, cur, member_id, index, variation_id):
-    redis = get_redis()
-    redis.rpush("history", "%s,%s,%s,%s" % (member_id, "%02d-%02d" % (index // 64, index % 64), variation_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+def buy_page_request_order(member_id, index, variation_id):
+    redis_conn.rpush("history", "%s,%s,%s,%s" % (member_id, "%02d-%02d" % (index // 64, index % 64), variation_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     return
 
-def buy_page_inc_stock_count(db, cur, variation_id, maxnum=4096):
-    redis = get_redis()
+def buy_page_inc_stock_count(variation_id, maxnum=4096):
     key = "sold_%0d" % variation_id
-    n = redis.incr(key)
+    n = redis_conn.incr(key)
     if n > maxnum:
-        redis.decr(key)
+        redis_conn.decr(key)
         return -1
     return n
 
@@ -153,23 +112,19 @@ def buy_page():
     variation_id = int(request.values['variation_id'])
     member_id = request.values['member_id']
 
-    db = None
-    cur = None
-
     vari = VARIATION[variation_id]
 
-    sold_count = buy_page_inc_stock_count(db, cur, variation_id)
+    sold_count = buy_page_inc_stock_count(variation_id)
     if sold_count < 0:
         return render_template('soldout.html')
 
     index = sold_count - 1
-    buy_page_request_order(db, cur, member_id, index, variation_id)
+    buy_page_request_order(member_id, index, variation_id)
 
     seat_id = "%02d-%02d" % (index // 64, index % 64)
 
-    redis = get_redis()
-    redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
-    redis.ltrim("recent", 0, 9)
+    redis_conn.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
+    redis_conn.ltrim("recent", 0, 9)
 
     return render_template('complete.html', seat_id=seat_id, member_id=member_id)
 
@@ -191,12 +146,11 @@ def create_top_html():
 
 def create_ticket_html(ticket_id):
 
-    redis = get_redis()
     ticket = TICKET[ticket_id]
 
     variations = []
     for v in ticket["variation"]:
-        v["sold_count"] = int(redis.get("sold_%0d" % v["id"]))
+        v["sold_count"] = int(redis_conn.get("sold_%0d" % v["id"]))
         variations.append(v)
 
     for variation in variations:
@@ -218,12 +172,11 @@ def create_ticket_html(ticket_id):
     file_write(HTML_BASE + '/ticket/%d' % ticket_id, html)
 
 def create_artist_html(artist_id):
-    redis = get_redis()
     artist = ARTIST[artist_id]
     tickets = [{
         "id": t["id"],
         "name": t["name"],
-        "count": sum([4096 - int(redis.get("sold_%0d" % v["id"])) for v in t["variation"]])
+        "count": sum([4096 - int(redis_conn.get("sold_%0d" % v["id"])) for v in t["variation"]])
     } for t in artist["ticket"]]
     html = render_to_string('artist.html', artist=artist, tickets=tickets)
     file_write(HTML_BASE + '/artist/%d' % artist_id, html)
@@ -245,21 +198,18 @@ def html_update():
 def admin_page():
     if request.method == 'POST':
         init_db()
-        redis = get_redis()
-        redis.delete('recent')
+        redis_conn.delete('recent')
         init_cache_html()
         return redirect("/admin")
     else:
-        redis = get_redis()
-        redis.delete('recent')
+        redis_conn.delete('recent')
         init_cache_html()
         return render_template('admin.html')
 
 @app.route("/admin/order.csv")
 def admin_csv():
-    redis = get_redis()
     body = ''
-    for i, row in enumerate(redis.lrange("history", 0, -1)):
+    for i, row in enumerate(redis_conn.lrange("history", 0, -1)):
         body += str(i + 1) + "," + row.decode("utf-8") + "\n"
     return Response(body, content_type="text/csv")
 
@@ -269,4 +219,3 @@ if __name__ == "__main__":
     app.run(debug=1, host='0.0.0.0', port=port)
 else:
     load_config()
-
