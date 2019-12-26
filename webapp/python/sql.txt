@@ -1,3 +1,7 @@
 create index stock_order on stock (order_id);
+
 alter table variation add sold_count int default 0;
+alter table order_request add seat_id VARCHAR(255) NOT NULL;
+alter table order_request add variation_id INT UNSIGNED NOT NULL;
+alter table order_request add updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
 

@@ -149,10 +149,10 @@ def get_ticket(ticket_id):
     return cache[id]
 
 
-def buy_page_request_order(db, cur, member_id):
+def buy_page_request_order(db, cur, member_id, index, variation_id):
     cur.execute(
-        'INSERT INTO order_request (member_id) VALUES (%s)',
-        (member_id,)
+        'INSERT INTO order_request (member_id, seat_id, variation_id) VALUES (%s, %s, %s)',
+        (member_id, "%02d-%02d" % (index // 64, index % 64), variation_id)
     )
     return db.insert_id()
 
@@ -202,9 +202,10 @@ def buy_page():
         db.rollback()
         return render_template('soldout.html')
 
-    order_id = buy_page_request_order(db, cur, member_id)
     index = sold_count - 1
-    rows = buy_page_reserve_stock2(cur, order_id, variation_id, vari['min_stock_id'] + index)
+    order_id = buy_page_request_order(db, cur, member_id, index, variation_id)
+    #rows = buy_page_reserve_stock2(cur, order_id, variation_id, vari['min_stock_id'] + index)
+    rows = 1
 
     if rows > 0:
         # stock = buy_page_get_seat_id(cur, order_id)
@@ -325,8 +326,8 @@ def admin_page():
 @app.route("/admin/order.csv")
 def admin_csv():
     cur = get_db().cursor()
-    cur.execute('''SELECT order_request.*, stock.seat_id, stock.variation_id, stock.updated_at
-         FROM order_request JOIN stock ON order_request.id = stock.order_id
+    cur.execute('''SELECT order_request.*
+         FROM order_request
          ORDER BY order_request.id ASC''')
     orders = cur.fetchall()
     cur.close()
