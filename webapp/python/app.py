@@ -11,6 +11,7 @@ from flask import (
 
 import json, os
 import redis
+import datetime
 
 config = {}
 
@@ -43,6 +44,45 @@ def connect_db():
     db = MySQLdb.connect(host=host, port=port, db=dbname, user=username, passwd=password, cursorclass=DictCursor, charset="utf8")
     return db
 
+
+ARTIST = {
+    1: { "id": 1, "name": "NHN48" },
+    2: { "id": 2, "name": "はだいろクローバーZ" }
+}
+
+TICKET = {
+    1: { "id": 1, "artist": ARTIST[1], "name": "西武ドームライブ" },
+    2: { "id": 2, "artist": ARTIST[1], "name": "東京ドームライブ" },
+    3: { "id": 3, "artist": ARTIST[2], "name": "さいたまスーパーアリーナライブ" },
+    4: { "id": 4, "artist": ARTIST[2], "name": "横浜アリーナライブ" },
+    5: { "id": 5, "artist": ARTIST[2], "name": "西武ドームライブ" },
+}
+
+VARIATION = {
+    1: { "id": 1, "ticket": TICKET[1], "name": "アリーナ席" },
+    2: { "id": 2, "ticket": TICKET[1], "name": "スタンド席" },
+    3: { "id": 3, "ticket": TICKET[2], "name": "アリーナ席" },
+    4: { "id": 4, "ticket": TICKET[2], "name": "スタンド席" },
+    5: { "id": 5, "ticket": TICKET[3], "name": "アリーナ席" },
+    6: { "id": 6, "ticket": TICKET[3], "name": "スタンド席" },
+    7: { "id": 7, "ticket": TICKET[4], "name": "アリーナ席" },
+    8: { "id": 8, "ticket": TICKET[4], "name": "スタンド席" },
+    9: { "id": 9, "ticket": TICKET[5], "name": "アリーナ席" },
+    10: { "id": 10, "ticket": TICKET[5], "name": "スタンド席" },
+}
+
+for e in ARTIST.values():
+    e["ticket"] = [t for t in TICKET.values() if t["artist"] == e]
+
+for e in TICKET.values():
+    e["artist_name"] = e["artist"]["name"]
+    e["variation"] = [t for t in VARIATION.values() if t["ticket"] == e]
+
+for e in VARIATION.values():
+    e["ticket_name"] = e["ticket"]["name"]
+    e["artist"] = e["ticket"]["artist"]
+    e["artist_name"] = e["artist"]["name"]
+
 def init_db():
     print("Initializing database")
     db = get_db() 
@@ -53,7 +93,13 @@ def init_db():
             if line:
                 cur.execute(line)
         db.commit()
-          
+    
+    redis = get_redis()
+
+    redis.delete("history")
+    redis.delete("recent")
+    for variation in VARIATION.values():
+        redis.set("sold_%0d" % variation["id"], 0)
 
 def get_recent_sold():
     redis = get_redis()
@@ -81,21 +127,6 @@ def get_redis():
         cache['redis'] = redis.Redis(host='localhost', port=6379, db=0)
     return cache['redis']
 
-def get_variation():
-    if not 'variation' in cache:
-        variation = {}
-        cur = get_db().cursor()
-        cur.execute('''select variation.*, ticket.name as ticket_name, artist_id, artist.name as artist_name,
-            (select min(id) from stock where stock.variation_id = variation.id) as min_stock_id
-            from variation, ticket, artist
-            where variation.ticket_id = ticket.id and ticket.artist_id = artist.id
-            order by variation.id''')
-        for row in cur.fetchall():
-            variation[row['id']] = row
-        cur.close()
-        cache['variation'] = variation
-    return cache['variation']
-
 def get_artists():
     if not 'artists' in cache:
         cur = get_db().cursor()
@@ -110,43 +141,19 @@ def render_to_string(template_name, **context):
     result = template.render(**context)
     return result
 
-def get_stocks(id):
-    if not id in cache:
-        cur = get_db().cursor()
-        cur.execute(
-            'SELECT seat_id, null as order_id FROM stock WHERE variation_id = %s order by id',
-            (id,)
-        )
-        cache[id] = cur.fetchall()
-        cur.close()
-    return cache[id]
-
-def get_ticket(ticket_id):
-    if not id in cache:
-        cur = get_db().cursor()
-        cur.execute(
-            'SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = %s LIMIT 1',
-            (ticket_id,)
-        )
-        cache[id] = cur.fetchone()
-        cur.close()
-    return cache[id]
-
-
 def buy_page_request_order(db, cur, member_id, index, variation_id):
-    cur.execute(
-        'INSERT INTO order_request (member_id, seat_id, variation_id) VALUES (%s, %s, %s)',
-        (member_id, "%02d-%02d" % (index // 64, index % 64), variation_id)
-    )
-    return db.insert_id()
+    redis = get_redis()
+    redis.rpush("history", "%s,%s,%s,%s" % (member_id, "%02d-%02d" % (index // 64, index % 64), variation_id, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    return
 
-def buy_page_inc_stock_count(db, cur, variation_id):
-    cur.execute(
-        'UPDATE variation SET sold_count = last_insert_id(sold_count + 1) WHERE id = %s',
-        (variation_id,)
-    )
-    return db.insert_id()
-
+def buy_page_inc_stock_count(db, cur, variation_id, maxnum=4096):
+    redis = get_redis()
+    key = "sold_%0d" % variation_id
+    n = redis.incr(key)
+    if n > maxnum:
+        redis.decr(key)
+        return -1
+    return n
 
 @app.route("/buy", methods=['POST'])
 def buy_page():
@@ -154,22 +161,19 @@ def buy_page():
     variation_id = int(request.values['variation_id'])
     member_id = request.values['member_id']
 
-    variation = get_variation()
-    vari = variation[variation_id]
-
-    db = get_db()
-    cur = db.cursor()
+    db = None
+    cur = None
+    
+    vari = VARIATION[variation_id]
 
     sold_count = buy_page_inc_stock_count(db, cur, variation_id)
-    if sold_count > 4096:
-        db.rollback()
+    if sold_count < 0:
         return render_template('soldout.html')
 
     index = sold_count - 1
-    order_id = buy_page_request_order(db, cur, member_id, index, variation_id)
+    buy_page_request_order(db, cur, member_id, index, variation_id)
 
     seat_id = "%02d-%02d" % (index // 64, index % 64)
-    db.commit()
 
     redis = get_redis()
     redis.lpush("recent", "%s:%s:%s:%s" % (seat_id, vari['name'], vari['ticket_name'], vari['artist_name']))
@@ -191,19 +195,18 @@ def create_side_html():
 
 def create_top_html():
     artists = get_artists()
-    html = render_to_string('index.html', artists=artists)
+    html = render_to_string('index.html', artists=ARTIST.values())
     file_write(HTML_BASE + '/index.html', html)
 
 def create_ticket_html(ticket_id):
-    cur = get_db().cursor()
-   
-    ticket = get_ticket(ticket_id)
 
-    cur.execute(
-        'SELECT id, name, sold_count FROM variation WHERE ticket_id = %s',
-        (ticket_id,)
-    )
-    variations = cur.fetchall()
+    redis = get_redis()
+    ticket = TICKET[ticket_id]
+
+    variations = []
+    for v in ticket["variation"]:
+        v["sold_count"] = int(redis.get("sold_%0d" % v["id"]))
+        variations.append(v)
 
     for variation in variations:
         variation['vacancy'] = 4096 - variation['sold_count']
@@ -226,11 +229,8 @@ def create_ticket_html(ticket_id):
 def create_artist_html(artist_id):
     cur = get_db().cursor()
 
-    cur.execute('SELECT id, name FROM artist WHERE id = %s LIMIT 1', (artist_id,))
-    artist = cur.fetchone()
-
-    cur.execute('SELECT id, name FROM ticket WHERE artist_id = %s', (artist_id,))
-    tickets = cur.fetchall()
+    artist = ARTIST[artist_id]
+    tickets = artist["ticket"]
 
     for ticket in tickets:
         cur.execute(
@@ -246,15 +246,12 @@ def create_artist_html(artist_id):
     file_write(HTML_BASE + '/artist/%d' % artist_id, html)
 
 def init_cache_html():
-    variation = get_variation()
     create_side_html()
     create_top_html()
-    ticket_ids = set([e['ticket_id']  for e in variation.values()])
-    for ticket_id in ticket_ids:
-        create_ticket_html(ticket_id)
-    artist_ids = set([e['artist_id']  for e in variation.values()])
-    for artist_id in artist_ids:
-        create_artist_html(artist_id)
+    for ticket in TICKET.values():
+        create_ticket_html(ticket["id"])
+    for artist in ARTIST.values():
+        create_artist_html(artist["id"])
 
 @app.route("/update", methods=['GET'])
 def html_update():
@@ -277,15 +274,10 @@ def admin_page():
 
 @app.route("/admin/order.csv")
 def admin_csv():
-    cur = get_db().cursor()
-    cur.execute('''SELECT order_request.* FROM order_request ORDER BY order_request.id ASC''')
-    orders = cur.fetchall()
-    cur.close()
-
+    redis = get_redis()
     body = ''
-    for order in orders:
-        body += ','.join([str(order['id']), order['member_id'], order['seat_id'], str(order['variation_id']), order['updated_at'].strftime('%Y-%m-%d %X')])
-        body += "\n"
+    for i, row in enumerate(redis.lrange("history", 0, -1)):
+        body += str(i + 1) + "," + row.decode("utf-8") + "\n"
     return Response(body, content_type="text/csv")
 
 if __name__ == "__main__":
