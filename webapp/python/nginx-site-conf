@@ -78,10 +78,14 @@ server {
 	
 	location /buy {
 		proxy_pass http://app;
+		gzip off;
+		gzip_static off;
 	}
 	
 	location /update {
 		proxy_pass http://app;
+		gzip off;
+		gzip_static off;
 	}
 	
 	location /favicon.ico {
