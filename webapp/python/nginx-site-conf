@@ -48,6 +48,8 @@ server {
 		ssi  on;
                 ssi_last_modified on;
 		ssi_types text/html;
+		gzip off;
+		gzip_static off;
 	}
 
 	location /ticket {
@@ -56,6 +58,8 @@ server {
 		ssi  on;
                 ssi_last_modified on;
 		ssi_types text/html;
+		gzip off;
+		gzip_static off;
 	}
 
 	location /artist {
@@ -64,6 +68,8 @@ server {
 		ssi  on;
                 ssi_last_modified on;
 		ssi_types text/html;
+		gzip off;
+		gzip_static off;
 	}
 
 	location /admin {
