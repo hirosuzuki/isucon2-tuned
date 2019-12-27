@@ -3,17 +3,20 @@ package main
 // https://goji.io/
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"html/template"
 
+	_ "github.com/go-sql-driver/mysql"
 	"goji.io"
 	"goji.io/pat"
 )
 
 func home(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<a href='/hello/goji'>Hello</a>")
+	fmt.Fprintf(w, "<a href='/hello/goji'>Hello</a> <a href='/db'>db</a>")
 }
 
 func hello(w http.ResponseWriter, r *http.Request) {
@@ -22,27 +25,65 @@ func hello(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, %s!", name)
 }
 
+type Artist struct {
+	Id   int
+	Name string
+}
+
+func db(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("mysql", "isucon2app:isunageruna@/isucon2")
+	if err != nil {
+		fmt.Fprintf(w, "ERR")
+		return
+	}
+	defer db.Close()
+
+	stmt, err := db.Prepare("select id, name from artist")
+	if err != nil {
+		fmt.Fprintf(w, "ERR SELECT")
+		return
+	}
+
+	rows, _ := stmt.Query()
+
+	var artists []Artist
+	for rows.Next() {
+		artist := Artist{}
+		rows.Scan(&artist.Id, &artist.Name)
+		artists = append(artists, artist)
+	}
+
+	tmpl, err := template.ParseFiles("db.html")
+	if err != nil {
+
+	}
+
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
+	// https://golang.org/pkg/html/template/
+	tmpl.Execute(w, artists)
+}
+
 // https://stackoverflow.com/questions/36706033/go-http-listenandserve-logging-response
-type loggingResponseWriter struct {
+type LoggingResponseWriter struct {
 	status  int
 	bodyLen int
 	http.ResponseWriter
 }
 
-func (w *loggingResponseWriter) WriteHeader(code int) {
+func (w *LoggingResponseWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
-func (w *loggingResponseWriter) Write(body []byte) (int, error) {
+func (w *LoggingResponseWriter) Write(body []byte) (int, error) {
 	w.bodyLen += len(body)
 	return w.ResponseWriter.Write(body)
 }
 
 func log(inner http.Handler) http.Handler {
 	mw := func(w http.ResponseWriter, r *http.Request) {
-		lw := &loggingResponseWriter{
-			status: 200,
+		lw := &LoggingResponseWriter{
+			status:         200,
 			ResponseWriter: w,
 		}
 		now := time.Now()
@@ -66,6 +107,7 @@ func main() {
 	mux := goji.NewMux()
 	mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
+	mux.HandleFunc(pat.Get("/db"), db)
 	mux.HandleFunc(pat.Get("/hello/:name"), hello)
 	http.ListenAndServe("localhost:8080", mux)
 }
