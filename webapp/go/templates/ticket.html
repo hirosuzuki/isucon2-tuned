@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>isucon 2</title>
+    <meta charset="utf-8">
+    <link type="text/css" rel="stylesheet" href="/css/ui-lightness/jquery-ui-1.8.24.custom.css">
+    <link type="text/css" rel="stylesheet" href="/css/isucon2.css">
+    <script type="text/javascript" src="/js/jquery-1.8.2.min.js"></script>
+    <script type="text/javascript" src="/js/jquery-ui-1.8.24.custom.min.js"></script>
+    <script type="text/javascript" src="/js/isucon2.js"></script>
+  </head>
+  <body>
+    <header>
+      <a href="/">
+        <img src="/images/isucon_title.jpg">
+      </a>
+    </header>
+    <div id="sidebar">
+        {{ if .recentSold }}
+      <table>
+        <tr><th colspan="2">最近購入されたチケット</th></tr>
+        {{ range .recentSold }}
+        <tr>
+          <td class="recent_variation">{{ .ArtistName }} {{ .TicketName }} {{ .VariationName }}</td>
+          <td class="recent_seat_id">{{ .SeatID }}</td>
+        </tr>
+        {{ end }}
+      </table>
+      {{ end }}
+    </div>
+    <div id="content">
+
+
+      {{ $ticket := .ticket }}
+      <h2>{{ .ticket.Artist.Name }} : {{ .ticket.Name }}</h2>
+      <ul>
+          {{ range .variations }}
+      <li class="variation">
+        <form method="POST" action="/buy">
+          <input type="hidden" name="ticket_id" value="{{ $ticket.ID }}">
+          <input type="hidden" name="variation_id" value="{{ .ID }}">
+          <span class="variation_name">{{ .Name }}</span> 残り<span class="vacancy" id="vacancy_{{ .ID }}">{{ .Vacancy }}</span>席
+          <input type="text" name="member_id" value="">
+          <input type="submit" value="購入">
+        </form>
+      </li>
+          {{ end }}
+      </ul>
+      
+      <h3>席状況</h3>
+      {{ range .variations }}
+      <h4>{{ .Name }}</h4>
+      <table class="seats" data-variationid="{{ .ID }}">
+          {{ range .Seats }}
+        <tr>
+            {{ range . }}
+          <td id="{{ .ID }}" class="{{ if .State }}unavailable{{ else }}available{{ end }}"></td>
+            {{ end }}
+        </tr>
+          {{ end }}
+      </table>
+      {{ end }}
+
+
+    </div>
+  </body>
+</html>
