@@ -5,14 +5,19 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"net/http"
 	"html/template"
+	"net/http"
 	"strconv"
+
+	"github.com/pkg/profile"
 
 	_ "github.com/go-sql-driver/mysql"
 	"goji.io"
 	"goji.io/pat"
 )
+
+// create index stock_order on stock (order_id);
+// mysql -e 'set global long_query_time = 1; set global slow_query_log = ON'
 
 type Artist struct {
 	ID   int
@@ -20,29 +25,29 @@ type Artist struct {
 }
 
 type Ticket struct {
-	ID   int
-	Name string
+	ID     int
+	Name   string
+	Count  int
 	Artist Artist
-	Count int
 }
 
 type Seat struct {
-	ID   string
+	ID    string
 	State bool
 }
 
 type Variation struct {
-	ID   int
-	Name string
+	ID      int
+	Name    string
 	Vacancy int
-	Seats [][]Seat
+	Seats   [][]Seat
 }
 
 type Sold struct {
-	ArtistName string
-	TicketName string
+	ArtistName    string
+	TicketName    string
 	VariationName string
-	SeatID string
+	SeatID        string
 }
 
 func getDb() (*sql.DB, error) {
@@ -51,22 +56,19 @@ func getDb() (*sql.DB, error) {
 
 func getRecentSold(db *sql.DB) (soldHistory []Sold) {
 	rows, err := db.Query(`
-	select
- artist.name,
- ticket.name,
- variation.name,
- stock.seat_id
-from order_request, stock, variation, ticket, artist
-where order_request.id = stock.order_id and stock.variation_id = variation.id and variation.ticket_id = ticket.id and ticket.artist_id = artist.id
-order by order_request.id desc
-limit 10
+	SELECT stock.seat_id, variation.name AS v_name, ticket.name AS t_name, artist.name AS a_name FROM stock
+        JOIN variation ON stock.variation_id = variation.id
+        JOIN ticket ON variation.ticket_id = ticket.id
+        JOIN artist ON ticket.artist_id = artist.id
+        WHERE order_id IS NOT NULL
+        ORDER BY order_id DESC LIMIT 10
 	`)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
 		for rows.Next() {
 			sold := Sold{}
-			rows.Scan(&sold.ArtistName, &sold.TicketName, &sold.VariationName, &sold.SeatID)
+			rows.Scan(&sold.SeatID, &sold.VariationName, &sold.TicketName, &sold.ArtistName)
 			soldHistory = append(soldHistory, sold)
 		}
 	}
@@ -74,7 +76,7 @@ limit 10
 }
 
 func getArtists(db *sql.DB) (artists []Artist) {
-	rows, err := db.Query("select id, name from artist order by id")
+	rows, err := db.Query("select id, name from artist")
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
@@ -98,25 +100,36 @@ func getArtist(db *sql.DB, id int) (artist Artist) {
 
 func getTickets(db *sql.DB, artistID int) (tickets []Ticket) {
 	rows, err := db.Query(`
-	select ticket.id, ticket.name, ticket.artist_id, artist.name,
-	(select count(*) from variation, stock where variation.ticket_id = ticket.id and variation.id = stock.variation_id and order_id is null) as available_count
-	from ticket left outer join artist on ticket.artist_id = artist.id
-	where artist.id = ? order by ticket.id`,
-	artistID)
+	select ticket.id, ticket.name from ticket
+	where ticket.artist_id = ?`,
+		artistID)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
 		for rows.Next() {
 			ticket := Ticket{}
-			rows.Scan(&ticket.ID, &ticket.Name, &ticket.Artist.ID, &ticket.Artist.Name, &ticket.Count)
+			rows.Scan(&ticket.ID, &ticket.Name)
 			tickets = append(tickets, ticket)
 		}
 	}
 	return tickets
 }
 
+func getTicketCount(db *sql.DB, ticketID int) (result int) {
+	row := db.QueryRow(
+		`SELECT COUNT(*) AS cnt FROM variation
+		INNER JOIN stock ON stock.variation_id = variation.id
+		WHERE variation.ticket_id = ? AND stock.order_id IS NULL`, ticketID)
+	err := row.Scan(&result)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+	return
+}
+
 func getTicket(db *sql.DB, id int) (ticket Ticket) {
-	row := db.QueryRow("select ticket.id, ticket.name, ticket.artist_id, artist.name from ticket left outer join artist on ticket.artist_id = artist.id where ticket.id = ?", id)
+	row := db.QueryRow(
+		`SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = ? LIMIT 1`, id)
 	err := row.Scan(&ticket.ID, &ticket.Name, &ticket.Artist.ID, &ticket.Artist.Name)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -125,7 +138,7 @@ func getTicket(db *sql.DB, id int) (ticket Ticket) {
 }
 
 func getVariations(db *sql.DB, variationID int) (variations []Variation) {
-	rows, err := db.Query("select variation.id, variation.name from variation where ticket_id = ? order by variation.id", variationID)
+	rows, err := db.Query(`SELECT id, name FROM variation WHERE ticket_id = ?`, variationID)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
@@ -140,31 +153,33 @@ func getVariations(db *sql.DB, variationID int) (variations []Variation) {
 
 func getSeats(db *sql.DB, variationID int) (seats [][]Seat, vacancy int) {
 	seats = make([][]Seat, 64)
-	vacancy =64 * 64
+	vacancy = 64 * 64
 
-	for row := 0; row < 64; row ++ {
+	for row := 0; row < 64; row++ {
 		seats[row] = make([]Seat, 64)
-		for col := 0; col < 64; col ++ {
+		for col := 0; col < 64; col++ {
 			seats[row][col] = Seat{fmt.Sprintf("%02d-%02d", row, col), false}
 		}
 	}
 
-	rows, err := db.Query("select seat_id from stock where variation_id = ? and order_id is not null", variationID)
+	rows, err := db.Query(`SELECT seat_id, order_id FROM stock WHERE variation_id = ?`, variationID)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
 		for rows.Next() {
 			var seatID string
-			rows.Scan(&seatID)
+			var orderID string
+			rows.Scan(&seatID, &orderID)
 			row, _ := strconv.Atoi(seatID[0:2])
 			col, _ := strconv.Atoi(seatID[3:5])
-			seats[row][col].State = true
-			vacancy --
+			if orderID != "" {
+				seats[row][col].State = true
+				vacancy--
+			}
 		}
 	}
-	return 
+	return
 }
-
 
 func outputTemplate(w http.ResponseWriter, filename string, data interface{}) error {
 	tmpl, err := template.ParseFiles("./templates/" + filename)
@@ -189,9 +204,9 @@ func home(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	data := map[string]interface{} {
+	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
-		"artists": getArtists(db),
+		"artists":    getArtists(db),
 	}
 
 	outputTemplate(w, "index.html", data)
@@ -207,10 +222,15 @@ func artist(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	data := map[string]interface{} {
+	tickets := getTickets(db, id)
+	for i := range tickets {
+		tickets[i].Count = getTicketCount(db, tickets[i].ID)
+	}
+
+	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
-		"artist": getArtist(db, id),
-		"tickets": getTickets(db, id),
+		"artist":     getArtist(db, id),
+		"tickets":    tickets,
 	}
 
 	outputTemplate(w, "artist.html", data)
@@ -233,9 +253,9 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 		variations[i].Seats = seats
 	}
 
-	data := map[string]interface{} {
+	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
-		"ticket": getTicket(db, id),
+		"ticket":     getTicket(db, id),
 		"variations": variations,
 	}
 	outputTemplate(w, "ticket.html", data)
@@ -267,8 +287,6 @@ func buy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("Order ID: ", orderID)
-
 	result, err = tx.Exec(`
 	UPDATE stock SET order_id = ?
 	WHERE variation_id = ? AND order_id IS NULL
@@ -298,10 +316,10 @@ func buy(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 
-	data := map[string]interface{} {
+	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
-		"seatID": seatID,
-		"memberID": memberID,
+		"seatID":     seatID,
+		"memberID":   memberID,
 	}
 
 	outputTemplate(w, "complete.html", data)
@@ -356,12 +374,13 @@ func csv(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	defer profile.Start(profile.ProfilePath(".")).Stop()
 	mux := goji.NewMux()
 	mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
-	mux.Handle(pat.Get("/css/*"), http.FileServer(http.Dir("../staticfiles")))
-	mux.Handle(pat.Get("/js/*"), http.FileServer(http.Dir("../staticfiles")))
-	mux.Handle(pat.Get("/images/*"), http.FileServer(http.Dir("../staticfiles")))
+	mux.Handle(pat.Get("/css/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
+	mux.Handle(pat.Get("/js/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
+	mux.Handle(pat.Get("/images/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
 	mux.HandleFunc(pat.Get("/artist/:id"), artist)
 	mux.HandleFunc(pat.Get("/ticket/:id"), ticket)
 	mux.HandleFunc(pat.Post("/buy"), buy)

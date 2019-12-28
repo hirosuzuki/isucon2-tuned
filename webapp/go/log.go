@@ -1,10 +1,10 @@
 package main
 
 import (
-	"net/http"
-	"time"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 )
 
 // https://stackoverflow.com/questions/36706033/go-http-listenandserve-logging-response
@@ -45,4 +45,11 @@ func log(inner http.Handler) http.Handler {
 			float64(deltaTime)/1000000000)
 	}
 	return http.HandlerFunc(mw)
+}
+
+func delay(inner http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Millisecond * 500)
+		inner.ServeHTTP(w, r)
+	})
 }
