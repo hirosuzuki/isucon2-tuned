@@ -100,7 +100,7 @@ func getArtist(db *sql.DB, id int) (artist Artist) {
 
 func getTickets(db *sql.DB, artistID int) (tickets []Ticket) {
 	rows, err := db.Query(`
-	select ticket.id, ticket.name from ticket
+	select ticket.id, ticket.name, ticket.sold_count from ticket
 	where ticket.artist_id = ?`,
 		artistID)
 	if err != nil {
@@ -108,7 +108,8 @@ func getTickets(db *sql.DB, artistID int) (tickets []Ticket) {
 	} else {
 		for rows.Next() {
 			ticket := Ticket{}
-			rows.Scan(&ticket.ID, &ticket.Name)
+			rows.Scan(&ticket.ID, &ticket.Name, &ticket.SoldCount)
+			ticket.Vacancy = 8192 - ticket.SoldCount
 			tickets = append(tickets, ticket)
 		}
 	}
@@ -139,13 +140,14 @@ func getTicket(db *sql.DB, id int) (ticket Ticket) {
 }
 
 func getVariations(db *sql.DB, ticketID int) (variations []Variation) {
-	rows, err := db.Query(`SELECT id, name FROM variation WHERE ticket_id = ?`, ticketID)
+	rows, err := db.Query(`SELECT id, name, sold_count FROM variation WHERE ticket_id = ?`, ticketID)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
 		for rows.Next() {
 			variation := Variation{}
-			rows.Scan(&variation.ID, &variation.Name)
+			rows.Scan(&variation.ID, &variation.Name, &variation.SoldCount)
+			variation.Vacancy = 4096 - variation.SoldCount
 			variations = append(variations, variation)
 		}
 	}
@@ -238,9 +240,6 @@ func artist(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	tickets := getTickets(db, id)
-	for i := range tickets {
-		tickets[i].Vacancy = getTicketCount(db, tickets[i].ID)
-	}
 
 	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
@@ -319,6 +318,18 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	if rowAffected < 1 {
 		tx.Rollback()
 		outputTemplate(w, "soldout.html", nil)
+		return
+	}
+
+	_, err = tx.Exec(`UPDATE ticket SET sold_count = sold_count + 1 WHERE id = ?`, variation.Ticket.ID)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+
+	_, err = tx.Exec(`UPDATE variation SET sold_count = sold_count + 1 WHERE id = ?`, variation.ID)
+	if err != nil {
+		fmt.Println("Error: ", err)
 		return
 	}
 
