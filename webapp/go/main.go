@@ -40,6 +40,7 @@ type Variation struct {
 	ID      int
 	Name    string
 	Vacancy int
+	Ticket Ticket
 	Seats   [][]Seat
 }
 
@@ -56,12 +57,9 @@ func getDb() (*sql.DB, error) {
 
 func getRecentSold(db *sql.DB) (soldHistory []Sold) {
 	rows, err := db.Query(`
-	SELECT stock.seat_id, variation.name AS v_name, ticket.name AS t_name, artist.name AS a_name FROM stock
-        JOIN variation ON stock.variation_id = variation.id
-        JOIN ticket ON variation.ticket_id = ticket.id
-        JOIN artist ON ticket.artist_id = artist.id
-        WHERE order_id IS NOT NULL
-        ORDER BY order_id DESC LIMIT 10
+	SELECT seat_id, variation_name, ticket_name, artist_name
+	FROM history
+    ORDER BY id DESC LIMIT 10
 	`)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -117,9 +115,10 @@ func getTickets(db *sql.DB, artistID int) (tickets []Ticket) {
 
 func getTicketCount(db *sql.DB, ticketID int) (result int) {
 	row := db.QueryRow(
-		`SELECT COUNT(*) AS cnt FROM variation
-		INNER JOIN stock ON stock.variation_id = variation.id
-		WHERE variation.ticket_id = ? AND stock.order_id IS NULL`, ticketID)
+		`SELECT COUNT(*) AS cnt
+		FROM stock
+		WHERE stock.variation_id in (select id from variation where ticket_id = ?)
+		 AND stock.order_id IS NULL`, ticketID)
 	err := row.Scan(&result)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -129,7 +128,7 @@ func getTicketCount(db *sql.DB, ticketID int) (result int) {
 
 func getTicket(db *sql.DB, id int) (ticket Ticket) {
 	row := db.QueryRow(
-		`SELECT t.*, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = ? LIMIT 1`, id)
+		`SELECT t.id, t.name, t.artist_id, a.name AS artist_name FROM ticket t INNER JOIN artist a ON t.artist_id = a.id WHERE t.id = ? LIMIT 1`, id)
 	err := row.Scan(&ticket.ID, &ticket.Name, &ticket.Artist.ID, &ticket.Artist.Name)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -137,8 +136,8 @@ func getTicket(db *sql.DB, id int) (ticket Ticket) {
 	return
 }
 
-func getVariations(db *sql.DB, variationID int) (variations []Variation) {
-	rows, err := db.Query(`SELECT id, name FROM variation WHERE ticket_id = ?`, variationID)
+func getVariations(db *sql.DB, ticketID int) (variations []Variation) {
+	rows, err := db.Query(`SELECT id, name FROM variation WHERE ticket_id = ?`, ticketID)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
@@ -149,6 +148,20 @@ func getVariations(db *sql.DB, variationID int) (variations []Variation) {
 		}
 	}
 	return variations
+}
+
+func getVariation(db *sql.DB, variationID int) (variation Variation) {
+	row := db.QueryRow(
+		`SELECT v.id v_id, v.name v_name, t.id t_id, t.name t_name, a.id a_id, a.name as a_name
+		 FROM variation v
+		  INNER JOIN ticket t ON v.ticket_id = t.id
+		  INNER JOIN artist a ON t.artist_id = a.id
+		WHERE v.id = ? LIMIT 1`, variationID)
+	err := row.Scan(&variation.ID, &variation.Name, &variation.Ticket.ID, &variation.Ticket.Name, &variation.Ticket.Artist.ID, &variation.Ticket.Artist.Name)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+	return
 }
 
 func getSeats(db *sql.DB, variationID int) (seats [][]Seat, vacancy int) {
@@ -272,6 +285,7 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	variationID, _ := strconv.Atoi(r.PostForm.Get("variation_id"))
 	memberID := r.PostForm.Get("member_id")
+	variation := getVariation(db, variationID)
 
 	tx, _ := db.Begin()
 
@@ -314,8 +328,21 @@ func buy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx.Commit()
 
+	_, err = tx.Exec(`
+	INSERT INTO history
+	(member_id, variation_id, variation_name, ticket_id, ticket_name, artist_id, artist_name, seat_id)
+	values
+	(?, ?, ?, ?, ?, ?, ?, ?)`,
+	memberID, variationID, variation.Name, variation.Ticket.ID, variation.Ticket.Name, variation.Ticket.Artist.ID, variation.Ticket.Artist.Name, seatID)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+
+
+	tx.Commit()
+	
 	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
 		"seatID":     seatID,
@@ -340,6 +367,9 @@ func initialize(w http.ResponseWriter, r *http.Request) {
 
 	db.Exec(`update stock set order_id = null`)
 	db.Exec(`delete from order_request`)
+	db.Exec(`delete from history`)
+	db.Exec(`update ticket set sold_count = 0`)
+	db.Exec(`update variation set sold_count = 0`)
 
 	w.WriteHeader(302)
 }
@@ -374,7 +404,7 @@ func csv(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	defer profile.Start(profile.ProfilePath(".")).Stop()
+	defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
 	/*
 	profiler.Start(profiler.Config{
 		Service:        "isucon2-0001",
