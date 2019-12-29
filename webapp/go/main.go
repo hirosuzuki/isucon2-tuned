@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strconv"
 
+	// "cloud.google.com/go/profiler"
 	"github.com/pkg/profile"
-
 	_ "github.com/go-sql-driver/mysql"
 	"goji.io"
 	"goji.io/pat"
@@ -375,6 +375,14 @@ func csv(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	defer profile.Start(profile.ProfilePath(".")).Stop()
+	/*
+	profiler.Start(profiler.Config{
+		Service:        "isucon2-0001",
+		ServiceVersion: "1.0.0",
+		// ProjectID must be set if not running on GCP.
+		// ProjectID: "my-project",
+	})
+	*/
 	mux := goji.NewMux()
 	mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
