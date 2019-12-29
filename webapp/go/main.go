@@ -3,6 +3,7 @@ package main
 // https://goji.io/
 
 import (
+	"compress/gzip"
 	"database/sql"
 	"fmt"
 	"html/template"
@@ -10,7 +11,7 @@ import (
 	"strconv"
 	"time"
 	"bytes"
-	"io/ioutil"
+	// "io/ioutil"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/pkg/profile"
@@ -50,9 +51,31 @@ type Sold struct {
 }
 
 var seatIDList []string
+var variationMaster map[int]Variation = make(map[int]Variation)
+var recentSold []Sold
 
 func getDb() (*sql.DB, error) {
 	return sql.Open("mysql", "isucon2app:isunageruna@/isucon2")
+}
+
+func loadVariationMaster(db *sql.DB) {
+	rows, err := db.Query(`
+	SELECT v.id, v.name, t.id, t.name, a.id, a.name
+	from variation v
+	inner join ticket t on t.id = v.ticket_id
+	inner join artist a on a.id = t.artist_id
+	`)
+	if err != nil {
+		fmt.Println("Error:", err)
+	} else {
+		for rows.Next() {
+			variation := Variation{}
+			rows.Scan(&variation.ID, &variation.Name, &variation.Ticket.ID,
+			&variation.Ticket.Name, &variation.Ticket.Artist.ID, &variation.Ticket.Artist.Name)
+			variationMaster[variation.ID] = variation
+		}
+	}
+	return
 }
 
 func getRecentSold(db *sql.DB) (soldHistory []Sold) {
@@ -166,6 +189,25 @@ func getVariation(db *sql.DB, variationID int) (variation Variation) {
 	return
 }
 
+
+func createGzipHTML(filename string, data interface{}) []byte {
+	// TODO: Refactor
+	tmpl, err := template.ParseFiles("./templates/" + filename)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return []byte{}
+	}
+	var buffer bytes.Buffer
+	zw := gzip.NewWriter(&buffer)
+	err = tmpl.Execute(zw, data)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return []byte{}
+	}
+	zw.Close()
+	return buffer.Bytes()
+}
+
 func createHTML(filename string, data interface{}) []byte {
 	tmpl, err := template.ParseFiles("./templates/" + filename)
 	if err != nil {
@@ -188,88 +230,21 @@ func outputTemplate(w http.ResponseWriter, filename string, data interface{}) er
 }
 
 func home(w http.ResponseWriter, r *http.Request) {
-	db, err := getDb()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-	defer db.Close()
-
-	data := map[string]interface{}{
-		"recentSold": getRecentSold(db),
-		"artists":    getArtists(db),
-	}
-
-	outputTemplate(w, "index.html", data)
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
+	w.Write(homeHTML)
 }
 
 func artist(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(pat.Param(r, "id"))
-
-	db, err := getDb()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-	defer db.Close()
-
-	tickets := getTickets(db, id)
-
-	data := map[string]interface{}{
-		"recentSold": getRecentSold(db),
-		"artist":     getArtist(db, id),
-		"tickets":    tickets,
-	}
-
-	outputTemplate(w, "artist.html", data)
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
+	w.Write(artistHTML[id])
 }
 
 func ticket(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(pat.Param(r, "id"))
-
-	db, err := getDb()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-	defer db.Close()
-
-	variations := getVariations(db, id)
-
-	var buf = make([]byte, 0, 100000)
-	for _, variation := range variations {
-		buf = append(buf, "<h4>"...)
-		buf = append(buf, variation.Name...)
-		buf = append(buf, "</h4>\n<table class=\"seats\" data-variationid=\""...)
-		buf = append(buf, strconv.Itoa(variation.ID)...)
-		buf = append(buf, "\">\n"...)
-		for row := 0; row < 64; row++ {
-			buf = append(buf, "<tr>\n"...)
-			for col := 0; col < 64; col++ {
-				seatID := seatIDList[row*64+col]
-				state := "available"
-				if col+row*64 < variation.SoldCount {
-					state = "unavailable"
-				}
-				buf = append(buf, "<td id=\""...)
-				buf = append(buf, seatID...)
-				buf = append(buf, "\" class=\""...)
-				buf = append(buf, state...)
-				buf = append(buf, "\"></td>\n"...)
-			}
-			buf = append(buf, "</tr>\n"...)
-		}
-		buf = append(buf, "</html>\n"...)
-	}
-	html := string(buf)
-
-	data := map[string]interface{}{
-		"recentSold": getRecentSold(db),
-		"ticket":     getTicket(db, id),
-		"variations": variations,
-		"seatHTML":   template.HTML(html),
-	}
-	outputTemplate(w, "ticket.html", data)
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
+	// w.Header().Add("Content-Encoding", "gzip")
+	w.Write(ticketHTML[id])
 }
 
 func buy(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +258,7 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	variationID, _ := strconv.Atoi(r.PostForm.Get("variation_id"))
 	memberID := r.PostForm.Get("member_id")
-	variation := getVariation(db, variationID)
+	variation := variationMaster[variationID]
 
 	tx, _ := db.Begin()
 
@@ -323,7 +298,7 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	tx.Commit()
 
 	data := map[string]interface{}{
-		"recentSold": getRecentSold(db),
+		"recentSold": recentSold,
 		"seatID":     seatID,
 		"memberID":   memberID,
 	}
@@ -341,6 +316,15 @@ func initMaster() {
 	for i := 0; i < 4096; i++ {
 		seatIDList[i] = fmt.Sprintf("%02d-%02d", i/64, i%64)
 	}
+
+	db, err := getDb()
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	defer db.Close()
+
+	loadVariationMaster(db)
 }
 
 func initialize(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +340,8 @@ func initialize(w http.ResponseWriter, r *http.Request) {
 	db.Exec(`delete from history`)
 	db.Exec(`update ticket set sold_count = 0`)
 	db.Exec(`update variation set sold_count = 0`)
+
+	updateHTML()
 
 	w.WriteHeader(302)
 }
@@ -389,15 +375,88 @@ func csv(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+var homeHTML []byte
+var artistHTML map[int]([]byte) = make(map[int]([]byte))
+var ticketHTML map[int]([]byte) = make(map[int]([]byte))
+
 func updateHTML() {
+	db, err := getDb()
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	defer db.Close()
+
+	recentSold = getRecentSold(db)
+	artists := getArtists(db)
+
+	data := map[string]interface{}{
+		"recentSold": recentSold,
+		"artists": artists,
+	}
+
+	homeHTML = createHTML("index.html", data)
+
+	for _, artist := range artists {
+		tickets := getTickets(db, artist.ID)
+
+		data := map[string]interface{}{
+			"recentSold": recentSold,
+			"artist":     artist,
+			"tickets":    tickets,
+		}
+		artistHTML[artist.ID] = createHTML("artist.html", data)
+
+		for _, ticket := range tickets {
+
+			variations := getVariations(db, ticket.ID)
+
+			var buf = make([]byte, 0, 100000)
+			for _, variation := range variations {
+				buf = append(buf, "<h4>"...)
+				buf = append(buf, variation.Name...)
+				buf = append(buf, "</h4>\n<table class=\"seats\" data-variationid=\""...)
+				buf = append(buf, strconv.Itoa(variation.ID)...)
+				buf = append(buf, "\">\n"...)
+				for row := 0; row < 64; row++ {
+					buf = append(buf, "<tr>\n"...)
+					for col := 0; col < 64; col++ {
+						seatID := seatIDList[row*64+col]
+						state := "available"
+						if col+row*64 < variation.SoldCount {
+							state = "unavailable"
+						}
+						buf = append(buf, "<td id=\""...)
+						buf = append(buf, seatID...)
+						buf = append(buf, "\" class=\""...)
+						buf = append(buf, state...)
+						buf = append(buf, "\"></td>\n"...)
+					}
+					buf = append(buf, "</tr>\n"...)
+				}
+				buf = append(buf, "</html>\n"...)
+			}
+			html := string(buf)
+		
+			data := map[string]interface{}{
+				"recentSold": recentSold,
+				"ticket":     ticket,
+				"variations": variations,
+				"seatHTML":   template.HTML(html),
+			}
+			ticketHTML[ticket.ID] = createHTML("ticket.html", data)
+		}
+
+	}
 
 }
 
 func serveGzFile(filename string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//conts, _ := ioutil.ReadFile(filename)
+		//w.Write(conts)
+		http.ServeFile(w, r, filename)
 		w.Header().Add("Content-Encoding", "gzip")
-		conts, _ := ioutil.ReadFile(filename)
-		w.Write(conts)
 	})
 }
 
@@ -421,7 +480,7 @@ func main() {
 	updateHTML()
 	go func() {
 		for true {
-			time.Sleep(time.Millisecond * 500)
+			time.Sleep(time.Millisecond * 750)
 			updateHTML()
 		}
 	}()
