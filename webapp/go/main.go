@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 
-	// "cloud.google.com/go/profiler"
 	"github.com/pkg/profile"
 	_ "github.com/go-sql-driver/mysql"
 	"goji.io"
@@ -52,6 +51,11 @@ type Sold struct {
 	VariationName string
 	SeatID        string
 }
+
+var artistList map[int]Artist
+var ticketList map[int]Ticket
+var variationList map[int]Variation
+var seatIDList []string
 
 func getDb() (*sql.DB, error) {
 	return sql.Open("mysql", "isucon2app:isunageruna@/isucon2")
@@ -179,7 +183,7 @@ func getSeats(db *sql.DB, variationID int) (seats [][]Seat, vacancy int) {
 		seats[row] = make([]Seat, 64)
 		for col := 0; col < 64; col++ {
 			state := (col + row * 64 < soldCount)
-			seats[row][col] = Seat{fmt.Sprintf("%02d-%02d", row, col), state}
+			seats[row][col] = Seat{seatIDList[row * 64 + col], state}
 		}
 	}
 
@@ -260,7 +264,7 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 		for row := 0; row < 64; row++ {
 			buf = append(buf, "<tr>\n"...)
 			for col := 0; col < 64; col++ {
-				seatID := fmt.Sprintf("%02d-%02d", row, col)
+				seatID := seatIDList[row * 64 + col]
 				state := "available"
 				if col + row * 64 < variation.SoldCount {
 					state = "unavailable"
@@ -321,7 +325,7 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	index := soldCount - 1
-	seatID := fmt.Sprintf("%02d-%02d", index / 64, index % 64)
+	seatID := seatIDList[index]
 
 	_, err = tx.Exec(`
 	INSERT INTO history
@@ -349,6 +353,13 @@ func buy(w http.ResponseWriter, r *http.Request) {
 
 func admin(w http.ResponseWriter, r *http.Request) {
 	outputTemplate(w, "admin.html", nil)
+}
+
+func initMaster() {
+	seatIDList = make([]string, 4096)
+	for i := 0; i < 4096; i++ {
+		seatIDList[i] = fmt.Sprintf("%02d-%02d", i / 64, i % 64)
+	}
 }
 
 func initialize(w http.ResponseWriter, r *http.Request) {
@@ -399,14 +410,6 @@ func csv(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
-	/*
-	profiler.Start(profiler.Config{
-		Service:        "isucon2-0001",
-		ServiceVersion: "1.0.0",
-		// ProjectID must be set if not running on GCP.
-		// ProjectID: "my-project",
-	})
-	*/
 	mux := goji.NewMux()
 	mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
@@ -419,5 +422,6 @@ func main() {
 	mux.HandleFunc(pat.Get("/admin"), admin)
 	mux.HandleFunc(pat.Post("/admin"), initialize)
 	mux.HandleFunc(pat.Get("/admin/order.csv"), csv)
+	initMaster()
 	http.ListenAndServe("0.0.0.0:8080", mux)
 }
