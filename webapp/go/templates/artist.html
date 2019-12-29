@@ -35,7 +35,7 @@
 <ul>
     {{ range .tickets }}
 <li class="ticket">
-<a href="/ticket/{{ .ID }}">{{ .Name }}</a>残り<span class="count">{{ .Count }}</span>枚
+<a href="/ticket/{{ .ID }}">{{ .Name }}</a>残り<span class="count">{{ .Vacancy }}</span>枚
 </li>
     {{ end }}
 </ul>

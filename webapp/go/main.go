@@ -27,7 +27,8 @@ type Artist struct {
 type Ticket struct {
 	ID     int
 	Name   string
-	Count  int
+	Vacancy int
+	SoldCount int
 	Artist Artist
 }
 
@@ -40,6 +41,7 @@ type Variation struct {
 	ID      int
 	Name    string
 	Vacancy int
+	SoldCount int
 	Ticket Ticket
 	Seats   [][]Seat
 }
@@ -237,7 +239,7 @@ func artist(w http.ResponseWriter, r *http.Request) {
 
 	tickets := getTickets(db, id)
 	for i := range tickets {
-		tickets[i].Count = getTicketCount(db, tickets[i].ID)
+		tickets[i].Vacancy = getTicketCount(db, tickets[i].ID)
 	}
 
 	data := map[string]interface{}{
