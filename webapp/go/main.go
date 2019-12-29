@@ -290,7 +290,26 @@ func buy(w http.ResponseWriter, r *http.Request) {
 
 	tx, _ := db.Begin()
 
-	result, err := tx.Exec(`INSERT INTO order_request (member_id) VALUES (?)`, memberID)
+	result, err := tx.Exec(`UPDATE variation SET sold_count = last_insert_id(sold_count + 1) WHERE id = ?`, variation.ID)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	soldCount, err := result.LastInsertId()
+
+	if soldCount > 4096 {
+		tx.Rollback()
+		outputTemplate(w, "soldout.html", nil)
+		return
+	}
+
+	_, err = tx.Exec(`UPDATE ticket SET sold_count = sold_count + 1 WHERE id = ?`, variation.Ticket.ID)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+
+	result, err = tx.Exec(`INSERT INTO order_request (member_id) VALUES (?)`, memberID)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
@@ -318,18 +337,6 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	if rowAffected < 1 {
 		tx.Rollback()
 		outputTemplate(w, "soldout.html", nil)
-		return
-	}
-
-	_, err = tx.Exec(`UPDATE ticket SET sold_count = sold_count + 1 WHERE id = ?`, variation.Ticket.ID)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	_, err = tx.Exec(`UPDATE variation SET sold_count = sold_count + 1 WHERE id = ?`, variation.ID)
-	if err != nil {
-		fmt.Println("Error: ", err)
 		return
 	}
 
@@ -396,9 +403,9 @@ func csv(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-	SELECT order_request.*, stock.seat_id, stock.variation_id, stock.updated_at
-         FROM order_request JOIN stock ON order_request.id = stock.order_id
-         ORDER BY order_request.id ASC`)
+	SELECT id, member_id, seat_id, variation_id, updated_at
+         FROM history
+         ORDER BY id ASC`)
 	if err != nil {
 		fmt.Println("Error:", err)
 	} else {
