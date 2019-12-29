@@ -32,7 +32,7 @@
 
 
       {{ $ticket := .ticket }}
-      <h2>{{ .ticket.Artist.Name }} : {{ .ticket.Name }}</h2>
+      <h2>{{ .artist.Name }} : {{ .ticket.Name }}</h2>
       <ul>
           {{ range .variations }}
       <li class="variation">

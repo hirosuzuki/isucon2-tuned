@@ -189,10 +189,21 @@ func getVariation(db *sql.DB, variationID int) (variation Variation) {
 	return
 }
 
+var templates map[string]*template.Template = make(map[string]*template.Template)
+
+func loadTemplate(filename string) (tmpl *template.Template, err error) {
+	var ok bool
+	tmpl, ok = templates[filename]
+	if !ok {
+		tmpl, err = template.ParseFiles("./templates/" + filename)
+		templates[filename] = tmpl
+	}
+	return
+}
 
 func createGzipHTML(filename string, data interface{}) []byte {
 	// TODO: Refactor
-	tmpl, err := template.ParseFiles("./templates/" + filename)
+	tmpl, err := loadTemplate(filename)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return []byte{}
@@ -209,7 +220,7 @@ func createGzipHTML(filename string, data interface{}) []byte {
 }
 
 func createHTML(filename string, data interface{}) []byte {
-	tmpl, err := template.ParseFiles("./templates/" + filename)
+	tmpl, err := loadTemplate(filename)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return []byte{}
@@ -434,12 +445,13 @@ func updateHTML() {
 					}
 					buf = append(buf, "</tr>\n"...)
 				}
-				buf = append(buf, "</html>\n"...)
+				buf = append(buf, "</table>\n"...)
 			}
 			html := string(buf)
 		
 			data := map[string]interface{}{
 				"recentSold": recentSold,
+				"artist":     artist,
 				"ticket":     ticket,
 				"variations": variations,
 				"seatHTML":   template.HTML(html),
