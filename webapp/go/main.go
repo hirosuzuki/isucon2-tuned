@@ -249,15 +249,39 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	variations := getVariations(db, id)
-	for i := range variations {
-		seats, _ := getSeats(db, variations[i].ID)
-		variations[i].Seats = seats
+
+	var buf = make([]byte, 0, 100000)
+	for _, variation := range variations {
+		buf = append(buf, "<h4>"...)
+		buf = append(buf, variation.Name...)
+		buf = append(buf, "</h4>\n<table class=\"seats\" data-variationid=\""...)
+		buf = append(buf, strconv.Itoa(variation.ID)...)
+		buf = append(buf, "\">\n"...)
+		for row := 0; row < 64; row++ {
+			buf = append(buf, "<tr>\n"...)
+			for col := 0; col < 64; col++ {
+				seatID := fmt.Sprintf("%02d-%02d", row, col)
+				state := "available"
+				if col + row * 64 < variation.SoldCount {
+					state = "unavailable"
+				}
+				buf = append(buf, "<td id=\""...)
+				buf = append(buf, seatID...)
+				buf = append(buf, "\" class=\""...)
+				buf = append(buf, state...)
+				buf = append(buf, "\"></td>\n"...)
+			}
+			buf = append(buf, "</tr>\n"...)
+		}
+		buf = append(buf, "</html>\n"...)
 	}
+	html := string(buf)
 
 	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
 		"ticket":     getTicket(db, id),
 		"variations": variations,
+		"seatHTML": template.HTML(html),
 	}
 	outputTemplate(w, "ticket.html", data)
 }

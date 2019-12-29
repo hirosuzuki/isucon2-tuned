@@ -48,18 +48,7 @@
       </ul>
       
       <h3>席状況</h3>
-      {{ range .variations }}
-      <h4>{{ .Name }}</h4>
-      <table class="seats" data-variationid="{{ .ID }}">
-          {{ range .Seats }}
-        <tr>
-            {{ range . }}
-          <td id="{{ .ID }}" class="{{ if .State }}unavailable{{ else }}available{{ end }}"></td>
-            {{ end }}
-        </tr>
-          {{ end }}
-      </table>
-      {{ end }}
+      {{ .seatHTML }}
 
 
     </div>
