@@ -8,9 +8,11 @@ import (
 	"html/template"
 	"net/http"
 	"strconv"
+	"time"
+	"bytes"
 
-	"github.com/pkg/profile"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/pkg/profile"
 	"goji.io"
 	"goji.io/pat"
 )
@@ -24,19 +26,19 @@ type Artist struct {
 }
 
 type Ticket struct {
-	ID     int
-	Name   string
-	Vacancy int
+	ID        int
+	Name      string
+	Vacancy   int
 	SoldCount int
-	Artist Artist
+	Artist    Artist
 }
 
 type Variation struct {
-	ID      int
-	Name    string
-	Vacancy int
+	ID        int
+	Name      string
+	Vacancy   int
 	SoldCount int
-	Ticket Ticket
+	Ticket    Ticket
 }
 
 type Sold struct {
@@ -46,9 +48,6 @@ type Sold struct {
 	SeatID        string
 }
 
-var artistList map[int]Artist
-var ticketList map[int]Ticket
-var variationList map[int]Variation
 var seatIDList []string
 
 func getDb() (*sql.DB, error) {
@@ -166,19 +165,25 @@ func getVariation(db *sql.DB, variationID int) (variation Variation) {
 	return
 }
 
-func outputTemplate(w http.ResponseWriter, filename string, data interface{}) error {
+func createHTML(filename string, data interface{}) []byte {
 	tmpl, err := template.ParseFiles("./templates/" + filename)
 	if err != nil {
 		fmt.Println("Error: ", err)
-		return err
+		return []byte{}
 	}
-	w.Header().Add("Content-Type", "text/html; charset=utf-8")
-	err = tmpl.Execute(w, data)
+	var buffer bytes.Buffer
+	err = tmpl.Execute(&buffer, data)
 	if err != nil {
 		fmt.Println("Error: ", err)
-		return err
+		return []byte{}
 	}
-	return nil
+	return buffer.Bytes()
+}
+
+func outputTemplate(w http.ResponseWriter, filename string, data interface{}) error {
+	w.Header().Add("Content-Type", "text/html; charset=utf-8")
+	_, err := w.Write(createHTML(filename, data))
+	return err
 }
 
 func home(w http.ResponseWriter, r *http.Request) {
@@ -240,9 +245,9 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 		for row := 0; row < 64; row++ {
 			buf = append(buf, "<tr>\n"...)
 			for col := 0; col < 64; col++ {
-				seatID := seatIDList[row * 64 + col]
+				seatID := seatIDList[row*64+col]
 				state := "available"
-				if col + row * 64 < variation.SoldCount {
+				if col+row*64 < variation.SoldCount {
 					state = "unavailable"
 				}
 				buf = append(buf, "<td id=\""...)
@@ -261,7 +266,7 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 		"recentSold": getRecentSold(db),
 		"ticket":     getTicket(db, id),
 		"variations": variations,
-		"seatHTML": template.HTML(html),
+		"seatHTML":   template.HTML(html),
 	}
 	outputTemplate(w, "ticket.html", data)
 }
@@ -308,15 +313,14 @@ func buy(w http.ResponseWriter, r *http.Request) {
 	(member_id, variation_id, variation_name, ticket_id, ticket_name, artist_id, artist_name, seat_id)
 	values
 	(?, ?, ?, ?, ?, ?, ?, ?)`,
-	memberID, variationID, variation.Name, variation.Ticket.ID, variation.Ticket.Name, variation.Ticket.Artist.ID, variation.Ticket.Artist.Name, seatID)
+		memberID, variationID, variation.Name, variation.Ticket.ID, variation.Ticket.Name, variation.Ticket.Artist.ID, variation.Ticket.Artist.Name, seatID)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
 
-
 	tx.Commit()
-	
+
 	data := map[string]interface{}{
 		"recentSold": getRecentSold(db),
 		"seatID":     seatID,
@@ -334,7 +338,7 @@ func admin(w http.ResponseWriter, r *http.Request) {
 func initMaster() {
 	seatIDList = make([]string, 4096)
 	for i := 0; i < 4096; i++ {
-		seatIDList[i] = fmt.Sprintf("%02d-%02d", i / 64, i % 64)
+		seatIDList[i] = fmt.Sprintf("%02d-%02d", i/64, i%64)
 	}
 }
 
@@ -384,6 +388,10 @@ func csv(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func updateHTML() {
+
+}
+
 func main() {
 	defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
 	mux := goji.NewMux()
@@ -399,5 +407,12 @@ func main() {
 	mux.HandleFunc(pat.Post("/admin"), initialize)
 	mux.HandleFunc(pat.Get("/admin/order.csv"), csv)
 	initMaster()
+	updateHTML()
+	go func() {
+		for true {
+			time.Sleep(time.Millisecond * 500)
+			updateHTML()
+		}
+	}()
 	http.ListenAndServe("0.0.0.0:8080", mux)
 }
