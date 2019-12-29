@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 	"bytes"
+	"io/ioutil"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/pkg/profile"
@@ -392,11 +393,21 @@ func updateHTML() {
 
 }
 
+func serveGzFile(filename string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Encoding", "gzip")
+		conts, _ := ioutil.ReadFile(filename)
+		w.Write(conts)
+	})
+}
+
 func main() {
 	defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
 	mux := goji.NewMux()
 	mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
+	mux.Handle(pat.Get("/js/jquery-1.8.2.min.js"), delay(serveGzFile("./js/jquery-1.8.2.min.js.gz")))
+	mux.Handle(pat.Get("/js/jquery-ui-1.8.24.custom.min.js"), delay(serveGzFile("./js/jquery-ui-1.8.24.custom.min.js.gz")))
 	mux.Handle(pat.Get("/css/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
 	mux.Handle(pat.Get("/js/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
 	mux.Handle(pat.Get("/images/*"), delay(http.FileServer(http.Dir("../staticfiles"))))
