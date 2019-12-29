@@ -51,7 +51,7 @@ func log(inner http.Handler) http.Handler {
 
 func delay(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(time.Millisecond * 2000)
+		time.Sleep(time.Millisecond * 2500)
 		inner.ServeHTTP(w, r)
 	})
 }
