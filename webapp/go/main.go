@@ -14,7 +14,7 @@ import (
 	// "io/ioutil"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/pkg/profile"
+	// "github.com/pkg/profile"
 	"goji.io"
 	"goji.io/pat"
 )
@@ -473,9 +473,9 @@ func serveGzFile(filename string) http.Handler {
 }
 
 func main() {
-	defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
+	// defer profile.Start(profile.ProfilePath("."), profile.CPUProfile).Stop()
 	mux := goji.NewMux()
-	mux.Use(log)
+	// mux.Use(log)
 	mux.HandleFunc(pat.Get("/"), home)
 	mux.Handle(pat.Get("/js/jquery-1.8.2.min.js"), delay(serveGzFile("./js/jquery-1.8.2.min.js.gz")))
 	mux.Handle(pat.Get("/js/jquery-ui-1.8.24.custom.min.js"), delay(serveGzFile("./js/jquery-ui-1.8.24.custom.min.js.gz")))
