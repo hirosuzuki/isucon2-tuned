@@ -169,32 +169,20 @@ func getVariation(db *sql.DB, variationID int) (variation Variation) {
 }
 
 func getSeats(db *sql.DB, variationID int) (seats [][]Seat, vacancy int) {
+	row := db.QueryRow(`SELECT sold_count FROM variation WHERE id = ?`, variationID)
+	var soldCount int
+	row.Scan(&soldCount)
+
 	seats = make([][]Seat, 64)
-	vacancy = 64 * 64
 
 	for row := 0; row < 64; row++ {
 		seats[row] = make([]Seat, 64)
 		for col := 0; col < 64; col++ {
-			seats[row][col] = Seat{fmt.Sprintf("%02d-%02d", row, col), false}
+			state := (col + row * 64 < soldCount)
+			seats[row][col] = Seat{fmt.Sprintf("%02d-%02d", row, col), state}
 		}
 	}
 
-	rows, err := db.Query(`SELECT seat_id, order_id FROM stock WHERE variation_id = ?`, variationID)
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		for rows.Next() {
-			var seatID string
-			var orderID string
-			rows.Scan(&seatID, &orderID)
-			row, _ := strconv.Atoi(seatID[0:2])
-			col, _ := strconv.Atoi(seatID[3:5])
-			if orderID != "" {
-				seats[row][col].State = true
-				vacancy--
-			}
-		}
-	}
 	return
 }
 
@@ -262,8 +250,7 @@ func ticket(w http.ResponseWriter, r *http.Request) {
 
 	variations := getVariations(db, id)
 	for i := range variations {
-		seats, vacancy := getSeats(db, variations[i].ID)
-		variations[i].Vacancy = vacancy
+		seats, _ := getSeats(db, variations[i].ID)
 		variations[i].Seats = seats
 	}
 
@@ -309,45 +296,8 @@ func buy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err = tx.Exec(`INSERT INTO order_request (member_id) VALUES (?)`, memberID)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	orderID, err := result.LastInsertId()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	result, err = tx.Exec(`
-	UPDATE stock SET order_id = ?
-	WHERE variation_id = ? AND order_id IS NULL
-	ORDER BY id
-	LIMIT 1`, orderID, variationID)
-
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	rowAffected, _ := result.RowsAffected()
-
-	if rowAffected < 1 {
-		tx.Rollback()
-		outputTemplate(w, "soldout.html", nil)
-		return
-	}
-
-	row := tx.QueryRow(`SELECT seat_id FROM stock WHERE order_id = ? LIMIT 1`, orderID)
-	var seatID string
-	err = row.Scan(&seatID)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
+	index := soldCount - 1
+	seatID := fmt.Sprintf("%02d-%02d", index / 64, index % 64)
 
 	_, err = tx.Exec(`
 	INSERT INTO history
