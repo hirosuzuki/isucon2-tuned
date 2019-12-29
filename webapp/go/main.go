@@ -31,18 +31,12 @@ type Ticket struct {
 	Artist Artist
 }
 
-type Seat struct {
-	ID    string
-	State bool
-}
-
 type Variation struct {
 	ID      int
 	Name    string
 	Vacancy int
 	SoldCount int
 	Ticket Ticket
-	Seats   [][]Seat
 }
 
 type Sold struct {
@@ -169,24 +163,6 @@ func getVariation(db *sql.DB, variationID int) (variation Variation) {
 	if err != nil {
 		fmt.Println("Error:", err)
 	}
-	return
-}
-
-func getSeats(db *sql.DB, variationID int) (seats [][]Seat, vacancy int) {
-	row := db.QueryRow(`SELECT sold_count FROM variation WHERE id = ?`, variationID)
-	var soldCount int
-	row.Scan(&soldCount)
-
-	seats = make([][]Seat, 64)
-
-	for row := 0; row < 64; row++ {
-		seats[row] = make([]Seat, 64)
-		for col := 0; col < 64; col++ {
-			state := (col + row * 64 < soldCount)
-			seats[row][col] = Seat{seatIDList[row * 64 + col], state}
-		}
-	}
-
 	return
 }
 
