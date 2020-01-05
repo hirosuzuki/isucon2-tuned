@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"os"
-	"database/sql"
 )
 
 // https://stackoverflow.com/questions/36706033/go-http-listenandserve-logging-response
@@ -56,38 +54,3 @@ func delay(inner http.Handler) http.Handler {
 	})
 }
 
-type QueryExecutor interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-}
-
-type QueryLogger struct {
-
-}
-
-func (logger *QueryLogger) Exec(executor QueryExecutor, query string, args ...interface{}) (sql.Result, error) {
-	return executor.Exec(query, args...)
-}
-
-func (logger *QueryLogger) Query(executor QueryExecutor, query string, args ...interface{}) (*sql.Rows, error) {
-	return executor.Query(query, args...)
-}
-
-func (logger *QueryLogger) QueryRow(executor QueryExecutor, query string, args ...interface{}) *sql.Row {
-	return executor.QueryRow(query, args...)
-}
-
-func (logger *QueryLogger) Stop() {
-	fmt.Fprintln(os.Stderr, "Query Logger Stop")
-	file, _ := os.Create("ql.txt")
-	defer file.Close()
-	fmt.Fprintln(file, "1")
-	fmt.Fprintln(file, "2")
-}
-
-func QueryLogStart() QueryLogger {
-	logger := QueryLogger{}
-	fmt.Fprintln(os.Stderr, "Query Logger Start")
-	return logger
-}
